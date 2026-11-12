@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4"><i class="fa-solid fa-wallet me-2 text-info"></i>Hesaplar ve Aracı Kurum Dağılımı</h2>
+
+<div class="card p-4">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Hesap / Kurum</th>
+                    <th>Varlık Sayısı</th>
+                    <th>Toplam Değer (₺)</th>
+                    <th>Toplam Maliyet (₺)</th>
+                    <th>Kâr / Zarar (₺)</th>
+                    <th>Portföy Payı</th>
+                </tr>
+            </thead>
+            <tbody id="brokersTable">
+                <tr><td colspan="6" class="text-center text-muted">Yükleniyor...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadBrokers() {
+    const res = await fetch('/api/dashboard');
+    const data = await res.json();
+    const tbody = document.getElementById('brokersTable');
+    tbody.innerHTML = '';
+    
+    if(!data.accounts || data.accounts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Hesap bilgisi bulunamadı.</td></tr>';
+        return;
+    }
+    
+    data.accounts.forEach(acc => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="fw-semibold">${acc.name}</td>
+            <td>${acc.count}</td>
+            <td>${acc.value.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'})}</td>
+            <td>${acc.cost.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'})}</td>
+            <td class="${acc.profit >= 0 ? 'text-success' : 'text-danger'}">${acc.profit.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'})} (%${acc.profit_pct.toFixed(2)})</td>
+            <td>%${acc.share_pct.toFixed(2)}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+loadBrokers();
+</script>
+{% endblock %}
