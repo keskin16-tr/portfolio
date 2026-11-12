@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block content %}
+<!-- Üst Piyasa Kartları (Altın, Dolar, Euro vb.) -->
+<div class="row g-3 mb-4" id="marketQuotesRow">
+    <div class="col-md-3">
+        <div class="card p-3 shadow-sm">
+            <div class="text-muted small">Piyasa Verileri</div>
+            <h5 class="fw-bold mt-1 text-secondary">Yükleniyor...</h5>
+        </div>
+    </div>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">Portföy Genel Görünüm</h4>
+    <button class="btn btn-outline-info btn-sm" onclick="triggerMarketRefresh()"><i class="fa-solid fa-rotate me-1"></i>Piyasa Fiyatlarını Güncelle</button>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card p-3 shadow-sm">
+            <div class="text-muted small">Toplam Portföy Değeri</div>
+            <h3 class="fw-bold mt-1" id="lblTotal">- ₺</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 shadow-sm">
+            <div class="text-muted small">Toplam Maliyet</div>
+            <h3 class="fw-bold mt-1" id="lblCost">- ₺</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 shadow-sm">
+            <div class="text-muted small">Toplam Kâr / Zarar</div>
+            <h3 class="fw-bold mt-1" id="lblProfit">-</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 shadow-sm">
+            <div class="text-muted small">Gerçekleşen PnL & Temettü</div>
+            <h3 class="fw-bold mt-1" id="lblRealized">-</h3>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-8">
+        <div class="card p-4 h-100">
+            <h5 class="card-title mb-3"><i class="fa-solid fa-chart-line me-2 text-primary"></i>Varlık Gelişimi & Geçmiş</h5>
+            <canvas id="historyChart" height="130"></canvas>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card p-4 h-100">
+            <h5 class="card-title mb-3"><i class="fa-solid fa-chart-pie me-2 text-info"></i>Kategori Dağılımı</h5>
+            <canvas id="categoryChart" height="180"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <div class="card p-4 h-100">
+            <h5 class="card-title mb-3"><i class="fa-solid fa-coins me-2 text-warning"></i>Para Birimi / Döviz Dağılımı</h5>
+            <canvas id="exposureChart" height="150"></canvas>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card p-4 h-100">
+            <h5 class="card-title mb-3"><i class="fa-solid fa-calendar-days me-2 text-success"></i>Aylık Gerçekleşen PnL</h5>
+            <canvas id="monthlyChart" height="150"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="card p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="fa-solid fa-list me-2 text-warning"></i>Son İşlemler</h5>
+        <a href="/manage" class="btn btn-sm btn-outline-light">Tümünü Gör / İşlem Yönetimi</a>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Tarih</th>
+                    <th>Varlık</th>
+                    <th>Tür</th>
+                    <th>Miktar</th>
+                    <th>Fiyat</th>
+                    <th>Tutar / PnL</th>
+                </tr>
+            </thead>
+            <tbody id="recentTxTable">
+                <tr><td colspan="6" class="text-center text-muted">Yükleniyor...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let historyChart = null, categoryChart = null, exposureChart = null, monthlyChart = null;
+
+async function loadMarketQuotes() {
+    try {
+        const res = await fetch('/api/market/quotes');
+        const data = await res.json();
+        const row = document.getElementById('marketQuotesRow');
+        row.innerHTML = '';
+        if (data.quotes) {
+            data.quotes.forEach(q => {
+                const changeHtml = q.change_pct !== null ? 
+                    `<span class="${q.change_pct >= 0 ? 'text-success' : 'text-danger'} small fw-bold">
+                        ${q.change_pct >= 0 ? '+' : ''}${q.change_pct.toFixed(2)}%
+                     </span>` : '';
+                const col = document.createElement('div');
+                col.className = 'col-md-3';
+                col.innerHTML = `
+                    <div class="card p-3 shadow-sm">
+                        <div class="text-muted small d-flex justify-content-between">
+                            <span>${q.label}</span>
+                            <span>${changeHtml}</span>
+                        </div>
+                        <h4 class="fw-bold mt-1 mb-0">${q.price.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} ${q.unit}</h4>
+                    </div>
+                `;
+                row.appendChild(col);
+            });
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function loadDashboard() {
+    loadMarketQuotes();
+    const res = await fetch('/api/dashboard');
+    const data = await res.json();
+    
+    document.getElementById('lblTotal').innerText = data.total_try.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'});
+    document.getElementById('lblCost').innerText = data.cost_try.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'});
+    
+    const profitEl = document.getElementById('lblProfit');
+    profitEl.innerText = data.profit_try.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'}) + ` (%${data.profit_pct.toFixed(2)})`;
+    profitEl.className = "fw-bold mt-1 " + (data.profit_try >= 0 ? "text-success" : "text-danger");
+    
+    const realizedEl = document.getElementById('lblRealized');
+    const totalRealized = (data.realized_pnl_try || 0);
+    realizedEl.innerText = totalRealized.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'});
+    realizedEl.className = "fw-bold mt-1 " + (totalRealized >= 0 ? "text-success" : "text-danger");
+
+    // Geçmiş Grafik
+    if(historyChart) historyChart.destroy();
+    historyChart = new Chart(document.getElementById('historyChart').getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: data.history.map(x => x.snapshot_date),
+            datasets: [{ label: 'Portföy Değeri (₺)', data: data.history.map(x => x.total_try), borderColor: '#89b4fa', backgroundColor: 'rgba(137, 180, 250, 0.1)', fill: true, tension: 0.2 }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+
+    // Kategori Grafik
+    if(categoryChart) categoryChart.destroy();
+    categoryChart = new Chart(document.getElementById('categoryChart').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: data.categories.map(x => x.name),
+            datasets: [{ data: data.categories.map(x => x.value), backgroundColor: ['#89b4fa', '#a6e3a1', '#f9e2af', '#f38ba8', '#cba6f7', '#fab387'] }]
+        },
+        options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+
+    // Para Birimi Dağılımı (Exposure)
+    if(exposureChart) exposureChart.destroy();
+    exposureChart = new Chart(document.getElementById('exposureChart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: data.exposure.map(x => x.name),
+            datasets: [{ label: 'Tutar (₺)', data: data.exposure.map(x => x.value), backgroundColor: '#a6e3a1' }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+
+    // Aylık Realized PnL
+    if(monthlyChart) monthlyChart.destroy();
+    monthlyChart = new Chart(document.getElementById('monthlyChart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: data.monthly_realized.map(x => x.month),
+            datasets: [{ label: 'Gerçekleşen PnL (₺)', data: data.monthly_realized.map(x => x.realized), backgroundColor: '#f9e2af' }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+
+    // Son İşlemler Tablosu
+    const tbody = document.getElementById('recentTxTable');
+    tbody.innerHTML = '';
+    if(!data.transactions || data.transactions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Henüz işlem bulunmuyor.</td></tr>';
+    } else {
+        data.transactions.slice(0, 10).forEach(tx => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${tx.transaction_date}</td>
+                <td class="fw-semibold">${tx.asset_name}</td>
+                <td><span class="badge bg-secondary">${tx.transaction_type}</span></td>
+                <td>${tx.quantity.toLocaleString('tr-TR')}</td>
+                <td>${tx.unit_price.toLocaleString('tr-TR')} ${tx.currency}</td>
+                <td class="${tx.realized_pnl_try >= 0 ? 'text-success' : 'text-danger'}">${tx.realized_pnl_try ? tx.realized_pnl_try.toLocaleString('tr-TR', {style: 'currency', currency: 'TRY'}) : '-'}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+}
+
+async function triggerMarketRefresh() {
+    const res = await fetch('/api/market/refresh', {method: 'POST'});
+    const result = await res.json();
+    if(result.ok) {
+        alert(`Piyasa verileri güncellendi! Güncellenen: ${result.updated_count}`);
+        loadDashboard();
+    } else {
+        alert('Güncelleme sırasında hata oluştu.');
+    }
+}
+
+loadDashboard();
+</script>
+{% endblock %}

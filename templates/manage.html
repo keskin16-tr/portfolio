@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block page_title %}Varlık ve İşlem Yönetimi{% endblock %}
+{% block page_subtitle %}Varlıklarınızı ekleyin, düzenleyin, silin veya geçmiş işlemlerinizi yönetin.{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header">
+    <span class="card-title">Kayıtlı Varlıklar</span>
+    <button class="btn btn-primary btn-sm" onclick="openAssetModal()">+ Yeni Varlık Ekle</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Varlık Adı</th><th>Kategori</th><th>Kurum</th><th class="num">Miktar</th><th class="num">Birim Fiyat</th><th class="num">Toplam Değer (TRY)</th><th style="text-align:right;">İşlem</th>
+        </tr>
+      </thead>
+      <tbody id="manage-assets-tbody"><tr><td colspan="7" style="text-align:center; color:var(--subtext0);">Yükleniyor...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Geçmiş İşlemler Defteri</span>
+    <button class="btn btn-success btn-sm" onclick="openTxModal()">⇄ İşlem Gir</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Tarih</th><th>Varlık</th><th>Tür</th><th class="num">Miktar</th><th class="num">Birim Fiyat</th><th class="num">Gerçekleşen PnL</th><th style="text-align:right;">İşlem</th>
+        </tr>
+      </thead>
+      <tbody id="manage-tx-tbody"><tr><td colspan="7" style="text-align:center; color:var(--subtext0);">Yükleniyor...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- İşlem Düzenleme Modalı Ek Altyapısı -->
+<div class="modal-backdrop" id="edit-tx-modal" onclick="backdropClose(event, 'edit-tx-modal')">
+  <div class="modal">
+    <div class="card-header">
+      <span class="card-title" id="edit-tx-modal-title">İşlemi Düzenle</span>
+      <button class="btn btn-sm" onclick="closeModal('edit-tx-modal')">✕</button>
+    </div>
+    <form id="edit-tx-form" onsubmit="updateTx(event)">
+      <input type="hidden" id="et-id" />
+      <div class="form-grid">
+        <div class="form-group"><label>İşlem Türü</label>
+          <select id="et-type">
+            <option value="Alış">Alış</option><option value="Satış">Satış</option><option value="Temettü">Temettü</option>
+            <option value="Para girişi">Para girişi</option><option value="Para çıkışı">Para çıkışı</option><option value="Transfer">Transfer</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Tarih</label><input id="et-date" type="date" required /></div>
+        <div class="form-group full"><label>Varlık Adı</label><input id="et-asset" required /></div>
+        <div class="form-group"><label>Miktar</label><input id="et-qty" type="number" step="any" required value="0" /></div>
+        <div class="form-group"><label>Birim Fiyat</label><input id="et-price" type="number" step="any" required value="0" /></div>
+        <div class="form-group"><label>Para Birimi</label>
+          <select id="et-currency"><option value="TRY">TRY</option><option value="USD">USD</option><option value="USDT">USDT</option><option value="EUR">EUR</option></select>
+        </div>
+        <div class="form-group full"><label>Not</label><input id="et-notes" /></div>
+      </div>
+      <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+        <button type="button" class="btn" onclick="closeModal('edit-tx-modal')">İptal</button>
+        <button type="submit" class="btn btn-primary">Güncelle</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allAssetsMap = {};
+let allTransactionsMap = {};
+
+async function loadPageData() {
+  const dash = await initSharedSidebar();
+  if (!dash) return;
+
+  allAssetsMap = {};
+  (dash.assets || []).forEach(a => { allAssetsMap[a.id] = a; });
+
+  allTransactionsMap = {};
+  (dash.transactions || []).forEach(t => { allTransactionsMap[t.id] = t; });
+
+  // Varlıklar Tablosu
+  const assetTbody = document.getElementById('manage-assets-tbody');
+  const assets = dash.assets || [];
+  if (assets.length === 0) {
+    assetTbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--subtext0);">Kayıtlı varlık yok.</td></tr>`;
+  } else {
+    assetTbody.innerHTML = assets.map(a => `
+      <tr>
+        <td><strong>${a.name}</strong> <span class="badge">${a.symbol || ''}</span></td>
+        <td>${a.category}</td>
+        <td>${a.account || '-'}</td>
+        <td class="num">${fmtNum(a.quantity, 4)}</td>
+        <td class="num">${fmtNum(a.unit_price, 2)} ${a.currency}</td>
+        <td class="num"><strong>${fmtTRY(a.value_try)}</strong></td>
+        <td style="text-align:right; white-space:nowrap;">
+          <button class="btn btn-sm" onclick='editAsset(${JSON.stringify(a)})'>Düzenle</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteAsset(${a.id})">Sil</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  // İşlemler Tablosu
+  const txTbody = document.getElementById('manage-tx-tbody');
+  const txs = dash.transactions || [];
+  if (txs.length === 0) {
+    txTbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--subtext0);">Kayıtlı işlem yok.</td></tr>`;
+  } else {
+    txTbody.innerHTML = txs.map(t => `
+      <tr>
+        <td>${t.transaction_date}</td>
+        <td><strong>${t.asset_name}</strong></td>
+        <td><span class="badge">${t.transaction_type}</span></td>
+        <td class="num">${fmtNum(t.quantity, 4)}</td>
+        <td class="num">${fmtNum(t.unit_price, 2)} ${t.currency}</td>
+        <td class="num ${t.realized_pnl_try >= 0 ? 'pos' : 'neg'}">${t.realized_pnl_try ? fmtTRY(t.realized_pnl_try) : '-'}</td>
+        <td style="text-align:right; white-space:nowrap;">
+          <button class="btn btn-sm" onclick='editTx(${JSON.stringify(t)})'>Düzenle</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteTx(${t.id})">Sil</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+}
+
+function editAsset(a) {
+  document.getElementById('a-id').value = a.id;
+  document.getElementById('a-name').value = a.name;
+  document.getElementById('a-category').value = a.category;
+  document.getElementById('a-symbol').value = a.symbol || '';
+  document.getElementById('a-market-symbol').value = a.market_symbol || '';
+  document.getElementById('a-account').value = a.account || '';
+  document.getElementById('a-source').value = a.price_source || 'auto';
+  document.getElementById('a-qty').value = a.quantity;
+  document.getElementById('a-currency').value = a.currency;
+  document.getElementById('a-cost').value = a.cost_per_unit;
+  document.getElementById('a-price').value = a.unit_price;
+  document.getElementById('a-notes').value = a.notes || '';
+  document.getElementById('asset-modal-title').textContent = 'Varlığı Düzenle: ' + a.name;
+  document.getElementById('asset-modal').classList.add('open');
+}
+
+function editTx(t) {
+  document.getElementById('et-id').value = t.id;
+  document.getElementById('et-type').value = t.transaction_type;
+  document.getElementById('et-date').value = t.transaction_date;
+  document.getElementById('et-asset').value = t.asset_name;
+  document.getElementById('et-qty').value = t.quantity;
+  document.getElementById('et-price').value = t.unit_price;
+  document.getElementById('et-currency').value = t.currency || 'TRY';
+  document.getElementById('et-notes').value = t.notes || '';
+  document.getElementById('edit-tx-modal-title').textContent = 'İşlemi Düzenle (ID: ' + t.id + ')';
+  document.getElementById('edit-tx-modal').classList.add('open');
+}
+
+async function deleteAsset(id) {
+  if (!confirm('Bu varlığı silmek istediğinize emin misiniz?')) return;
+  const res = await fetch(`/api/assets/${id}`, { method: 'DELETE' }).then(r => r.json());
+  if (res.ok) {
+    showToast('Varlık silindi.');
+    loadPageData();
+  } else {
+    showToast(res.error || 'Silme hatası');
+  }
+}
+
+async function deleteTx(id) {
+  if (!confirm('Bu işlemi silmek istediğinize emin misiniz?')) return;
+  const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' }).then(r => r.json());
+  if (res.ok) {
+    showToast('İşlem silindi.');
+    loadPageData();
+  } else {
+    showToast(res.error || 'İşlem silme hatası');
+  }
+}
+
+// Modal Form Kaydetme Fonksiyonları
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+function backdropClose(e, id) {
+  if (e.target.id === id) closeModal(id);
+}
+function openTxModal() {
+  document.getElementById('tx-form').reset();
+  document.getElementById('t-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('tx-modal').classList.add('open');
+}
+
+async function saveAsset(e) {
+  e.preventDefault();
+  const id = document.getElementById('a-id').value;
+  const payload = {
+    name: document.getElementById('a-name').value,
+    category: document.getElementById('a-category').value,
+    symbol: document.getElementById('a-symbol').value,
+    market_symbol: document.getElementById('a-market-symbol').value,
+    account: document.getElementById('a-account').value,
+    price_source: document.getElementById('a-source').value,
+    quantity: Number(document.getElementById('a-qty').value),
+    currency: document.getElementById('a-currency').value,
+    cost_per_unit: Number(document.getElementById('a-cost').value),
+    unit_price: Number(document.getElementById('a-price').value),
+    notes: document.getElementById('a-notes').value
+  };
+
+  const url = id ? `/api/assets/${id}` : '/api/assets';
+  const method = id ? 'PUT' : 'POST';
+
+  const res = await fetch(url, {
+    method: method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(r => r.json());
+
+  if (res.ok) {
+    showToast('Varlık başarıyla kaydedildi.');
+    closeModal('asset-modal');
+    loadPageData();
+  } else {
+    showToast(res.error || 'Kaydetme hatası');
+  }
+}
+
+async function saveTx(e) {
+  e.preventDefault();
+  const assetName = document.getElementById('t-asset').value;
+  const matched = Object.values(allAssetsMap).find(a => a.name.toLowerCase() === assetName.toLowerCase());
+
+  const payload = {
+    asset_id: matched ? matched.id : null,
+    asset_name: assetName,
+    transaction_type: document.getElementById('t-type').value,
+    transaction_date: document.getElementById('t-date').value,
+    quantity: Number(document.getElementById('t-qty').value),
+    unit_price: Number(document.getElementById('t-price').value),
+    currency: document.getElementById('t-currency').value,
+    notes: document.getElementById('t-notes').value,
+    apply: true
+  };
+
+  const res = await fetch('/api/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(r => r.json());
+
+  if (res.ok) {
+    showToast('İşlem başarıyla eklendi.');
+    closeModal('tx-modal');
+    loadPageData();
+  } else {
+    showToast(res.error || 'İşlem kaydetme hatası');
+  }
+}
+
+async function updateTx(e) {
+  e.preventDefault();
+  const id = document.getElementById('et-id').value;
+  const assetName = document.getElementById('et-asset').value;
+  const matched = Object.values(allAssetsMap).find(a => a.name.toLowerCase() === assetName.toLowerCase());
+
+  const payload = {
+    asset_id: matched ? matched.id : null,
+    asset_name: assetName,
+    transaction_type: document.getElementById('et-type').value,
+    transaction_date: document.getElementById('et-date').value,
+    quantity: Number(document.getElementById('et-qty').value),
+    unit_price: Number(document.getElementById('et-price').value),
+    currency: document.getElementById('et-currency').value,
+    notes: document.getElementById('et-notes').value
+  };
+
+  const res = await fetch(`/api/transactions/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(r => r.json());
+
+  if (res.ok) {
+    showToast('İşlem başarıyla güncellendi.');
+    closeModal('edit-tx-modal');
+    loadPageData();
+  } else {
+    showToast(res.error || 'İşlem güncelleme hatası');
+  }
+}
+
+loadPageData();
+</script>
+{% endblock %}

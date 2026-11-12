@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Portfolio Intelligence{% endblock %}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --base: #1e1e2e; --mantle: #181825; --crust: #11111b;
+      --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
+      --text: #cdd6f4; --subtext0: #a6adc8; --subtext1: #bac2de;
+      --blue: #89b4fa; --lavender: #b4befe; --sapphire: #74c7ec;
+      --teal: #94e2d5; --green: #a6e3a1; --yellow: #f9e2af;
+      --peach: #fab387; --red: #f38ba8; --mauve: #cba6f7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--base); color: var(--text);
+      display: flex; min-height: 100vh; overflow-x: hidden; flex-direction: row;
+    }
+
+    .sidebar {
+      width: 260px; background: var(--mantle); border-right: 1px solid var(--surface0);
+      display: flex; flex-direction: column; padding: 16px;
+      position: fixed; top: 0; bottom: 0; left: 0; z-index: 100;
+      transition: transform 0.25s ease;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 4px 16px; border-bottom: 1px solid var(--surface0); margin-bottom: 12px;
+    }
+    .brand-icon {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--blue), var(--mauve));
+      display: flex; align-items: center; justify-content: center;
+      color: var(--crust); font-weight: 800; font-size: 16px; flex-shrink: 0;
+    }
+    .brand-title { font-weight: 700; font-size: 15px; }
+    .brand-sub { font-size: 11px; color: var(--subtext0); }
+
+    .nav-link {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 12px; border-radius: 10px; color: var(--subtext1);
+      text-decoration: none; font-size: 14px; font-weight: 500;
+      transition: all 0.15s ease; margin-bottom: 4px; border: 1px solid transparent;
+    }
+    .nav-link:hover { background: var(--surface0); color: var(--text); }
+    .nav-link.active {
+      background: rgba(137, 180, 250, 0.15); color: var(--blue);
+      border-color: rgba(137, 180, 250, 0.35); font-weight: 600;
+    }
+
+    .sidebar-footer {
+      margin-top: auto; padding-top: 12px; border-top: 1px solid var(--surface0);
+      font-size: 12px; color: var(--subtext0);
+    }
+    .fx-pill {
+      display: flex; justify-content: space-between; align-items: center; padding: 6px 8px;
+      background: var(--crust); border-radius: 6px; margin-bottom: 5px; font-size: 12px;
+    }
+    .pos { color: var(--green); }
+    .neg { color: var(--red); }
+
+    .mobile-header-bar {
+      display: none; width: 100%; background: var(--mantle);
+      padding: 12px 16px; border-bottom: 1px solid var(--surface0);
+      align-items: center; justify-content: space-between; position: fixed; top: 0; left: 0; z-index: 101;
+    }
+    .menu-toggle-btn {
+      background: var(--surface0); border: 1px solid var(--surface1); color: var(--text);
+      padding: 6px 12px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+
+    .main { margin-left: 260px; flex: 1; padding: 24px; width: calc(100% - 260px); min-width: 0; }
+    .topbar {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+      gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--surface0);
+    }
+    .page-title { font-size: 22px; font-weight: 700; }
+    .page-subtitle { font-size: 13px; color: var(--subtext0); margin-top: 2px; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn {
+      padding: 8px 14px; border-radius: 8px; border: 1px solid var(--surface1);
+      background: var(--surface0); color: var(--text); font-size: 13px; font-weight: 600;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; white-space: nowrap;
+    }
+    .btn:hover { background: var(--surface1); }
+    .btn-primary { background: var(--blue); color: var(--crust); border-color: var(--blue); }
+    .btn-success { background: var(--green); color: var(--crust); border-color: var(--green); }
+    .btn-danger { background: rgba(243, 139, 168, 0.15); color: var(--red); border-color: rgba(243, 139, 168, 0.4); }
+    .btn-sm { padding: 4px 8px; font-size: 12px; }
+
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi-card { background: var(--mantle); border: 1px solid var(--surface0); border-radius: 14px; padding: 18px; }
+    .kpi-label { font-size: 12px; color: var(--subtext0); text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi-value { font-size: 22px; font-weight: 700; margin: 6px 0 4px; word-break: break-all; }
+    .kpi-sub { font-size: 12px; color: var(--subtext1); }
+
+    .charts-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; margin-bottom: 24px; }
+    .card { background: var(--mantle); border: 1px solid var(--surface0); border-radius: 14px; padding: 18px; overflow: hidden; }
+    .col-12 { grid-column: span 12; } .col-8 { grid-column: span 8; } .col-6 { grid-column: span 6; } .col-4 { grid-column: span 4; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
+    .card-title { font-size: 15px; font-weight: 600; color: var(--subtext1); }
+    .chart-box { position: relative; height: 280px; width: 100%; max-width: 100%; }
+
+    .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--surface0); white-space: nowrap; }
+    th { color: var(--subtext0); font-weight: 600; font-size: 12px; text-transform: uppercase; background: var(--crust); }
+    tr:hover td { background: rgba(49, 50, 68, 0.35); }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--surface0); color: var(--lavender); }
+
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(17, 17, 27, 0.85);
+      display: none; align-items: center; justify-content: center; z-index: 999; padding: 12px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--mantle); border: 1px solid var(--surface1); border-radius: 16px;
+      width: 100%; max-width: 520px; padding: 20px; max-height: 90vh; overflow-y: auto;
+    }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group.full { grid-column: span 2; }
+    label { font-size: 12px; color: var(--subtext0); }
+    input, select {
+      background: var(--crust); border: 1px solid var(--surface1); color: var(--text);
+      padding: 9px 11px; border-radius: 8px; font-size: 13px; width: 100%;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--blue); }
+
+    .toast {
+      position: fixed; bottom: 20px; right: 20px; background: var(--surface0);
+      border-left: 4px solid var(--blue); color: var(--text); padding: 12px 18px;
+      border-radius: 8px; font-size: 13px; z-index: 2000; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none;
+      max-width: calc(100vw - 32px);
+    }
+
+    @media (max-width: 960px) {
+      body { flex-direction: column; padding-top: 56px; }
+      .mobile-header-bar { display: flex; }
+      .sidebar {
+        width: 260px; height: 100vh; position: fixed; top: 0; left: 0;
+        transform: translateX(-100%); transition: transform 0.25s ease; z-index: 105;
+        box-shadow: 5px 0 25px rgba(0,0,0,0.5); padding-top: 20px;
+      }
+      .sidebar.mobile-open { transform: translateX(0); }
+      .main { margin-left: 0; width: 100%; padding: 14px; max-width: 100vw; }
+      .col-8, .col-6, .col-4 { grid-column: span 12; }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full { grid-column: span 1; }
+      .topbar { flex-direction: column; align-items: flex-start; gap: 10px; }
+      .actions { width: 100%; overflow-x: auto; padding-bottom: 4px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="mobile-header-bar">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <div class="brand-icon" style="width:28px; height:28px; font-size:13px;">PI</div>
+      <strong style="font-size:14px;">Portfolio Intel</strong>
+    </div>
+    <button class="menu-toggle-btn" onclick="toggleMobileMenu()">☰ Menü</button>
+  </div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-icon">PI</div>
+      <div>
+        <div class="brand-title">Portfolio Intel</div>
+        <div class="brand-sub">Çoklu Varlık Terminali</div>
+      </div>
+    </div>
+
+    <a href="{{ url_for('page_dashboard') }}" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">📊 Dashboard</a>
+    <a href="{{ url_for('page_crypto') }}" class="nav-link {% if active_page == 'crypto' %}active{% endif %}">🪙 Kriptolar</a>
+    <a href="{{ url_for('page_equities') }}" class="nav-link {% if active_page == 'equities' %}active{% endif %}">📈 Hisseler & Temettü</a>
+    <a href="{{ url_for('page_brokers') }}" class="nav-link {% if active_page == 'brokers' %}active{% endif %}">🏦 Aracı Kurumlar</a>
+    <a href="{{ url_for('page_analytics') }}" class="nav-link {% if active_page == 'analytics' %}active{% endif %}">📐 Risk & Analitik</a>
+    <a href="{{ url_for('page_manage') }}" class="nav-link {% if active_page == 'manage' %}active{% endif %}">🗂️ Varlıklar & İşlemler</a>
+
+    <div class="sidebar-footer">
+      <div style="margin-bottom: 8px; font-weight: 600; color: var(--subtext1);">Piyasa & Canlı Kurlar</div>
+      <div id="sidebar-fx">Yükleniyor...</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+        <p class="page-subtitle">{% block page_subtitle %}{% endblock %}</p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="btn-refresh" onclick="refreshMarket()">🔄 Piyasayı Güncelle</button>
+        <button class="btn" onclick="openAssetModal()">+ Varlık Ekle</button>
+        <button class="btn" onclick="openTxModal()">⇄ İşlem Gir</button>
+        <a class="btn" href="/api/export">📥 Excel İndir</a>
+      </div>
+    </header>
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Varlık Modal -->
+  <div class="modal-backdrop" id="asset-modal" onclick="backdropClose(event, 'asset-modal')">
+    <div class="modal">
+      <div class="card-header">
+        <span class="card-title" id="asset-modal-title">Yeni Varlık Ekle</span>
+        <button class="btn btn-sm" onclick="closeModal('asset-modal')">✕</button>
+      </div>
+      <form id="asset-form" onsubmit="saveAsset(event)">
+        <input type="hidden" id="a-id" />
+        <div class="form-grid">
+          <div class="form-group"><label>Varlık Adı *</label><input id="a-name" required placeholder="Örn: Bitcoin, THYAO" /></div>
+          <div class="form-group"><label>Kategori *</label>
+            <select id="a-category">
+              <option value="Kripto">Kripto</option>
+              <option value="Banka">Banka</option>
+              <option value="BIST Hisse">BIST Hisse</option>
+              <option value="ABD Hisse / ETF">ABD Hisse / ETF</option>
+              <option value="Emtia / Altın">Emtia / Altın</option>
+              <option value="Döviz">Döviz</option>
+              <option value="Fon / BES">Fon / BES</option>
+              <option value="Nakit">Nakit</option>
+              <option value="Diğer">Diğer</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Sembol</label><input id="a-symbol" placeholder="Örn: BTC, THYAO.IS" /></div>
+          <div class="form-group"><label>Piyasa Sembolü (API ID)</label><input id="a-market-symbol" placeholder="Örn: bitcoin, THYAO.IS" /></div>
+          <div class="form-group"><label>Aracı Kurum / Cüzdan</label><input id="a-account" placeholder="Örn: Binance, Midas, Ziraat" /></div>
+          <div class="form-group"><label>Fiyat Kaynağı</label>
+            <select id="a-source">
+              <option value="auto">Otomatik (API)</option>
+              <option value="coingecko">CoinGecko / Binance</option>
+              <option value="yahoo">Yahoo Finance</option>
+              <option value="manual">Manuel</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Miktar</label><input id="a-qty" type="number" step="any" required value="0" /></div>
+          <div class="form-group"><label>Para Birimi</label>
+            <select id="a-currency">
+              <option value="TRY">TRY</option><option value="USD">USD</option><option value="USDT">USDT</option>
+              <option value="EUR">EUR</option><option value="GBP">GBP</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Birim Maliyet</label><input id="a-cost" type="number" step="any" value="0" /></div>
+          <div class="form-group"><label>Güncel Birim Fiyat</label><input id="a-price" type="number" step="any" value="0" /></div>
+          <div class="form-group full"><label>Notlar</label><input id="a-notes" /></div>
+        </div>
+        <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+          <button type="button" class="btn" onclick="closeModal('asset-modal')">İptal</button>
+          <button type="submit" class="btn btn-primary">Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- İşlem Modal -->
+  <div class="modal-backdrop" id="tx-modal" onclick="backdropClose(event, 'tx-modal')">
+    <div class="modal">
+      <div class="card-header">
+        <span class="card-title">Yeni İşlem Ekle</span>
+        <button class="btn btn-sm" onclick="closeModal('tx-modal')">✕</button>
+      </div>
+      <form id="tx-form" onsubmit="saveTx(event)">
+        <div class="form-grid">
+          <div class="form-group"><label>İşlem Türü</label>
+            <select id="t-type">
+              <option value="Alış">Alış</option><option value="Satış">Satış</option><option value="Temettü">Temettü</option>
+              <option value="Para girişi">Para girişi</option><option value="Para çıkışı">Para çıkışı</option><option value="Transfer">Transfer</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Tarih</label><input id="t-date" type="date" required /></div>
+          <div class="form-group full"><label>Varlık Seçin veya Adını Yazın</label>
+            <input id="t-asset" list="asset-datalist" required placeholder="Örn: Bitcoin" />
+            <datalist id="asset-datalist"></datalist>
+          </div>
+          <div class="form-group"><label>Miktar</label><input id="t-qty" type="number" step="any" required value="0" /></div>
+          <div class="form-group"><label>Birim Fiyat</label><input id="t-price" type="number" step="any" required value="0" /></div>
+          <div class="form-group"><label>Para Birimi</label>
+            <select id="t-currency"><option value="TRY">TRY</option><option value="USD">USD</option><option value="USDT">USDT</option><option value="EUR">EUR</option></select>
+          </div>
+          <div class="form-group full"><label>Not</label><input id="t-notes" /></div>
+        </div>
+        <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+          <button type="button" class="btn" onclick="closeModal('tx-modal')">İptal</button>
+          <button type="submit" class="btn btn-success">İşlemi Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const PALETTE = ['#89b4fa', '#a6e3a1', '#fab387', '#cba6f7', '#94e2d5', '#f9e2af', '#f38ba8', '#74c7ec', '#b4befe', '#eba0ac'];
+    const charts = {};
+
+    function fmtTRY(n) {
+      return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 2 }).format(Number(n || 0));
+    }
+    function fmtNum(n, d = 2) {
+      return new Intl.NumberFormat('tr-TR', { maximumFractionDigits: d }).format(Number(n || 0));
+    }
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.style.display = 'block';
+      setTimeout(() => { el.style.display = 'none'; }, 3600);
+    }
+
+    function toggleMobileMenu() {
+      const sb = document.getElementById('sidebar');
+      sb.classList.toggle('mobile-open');
+    }
+
+    function renderChart(id, config) {
+      const ctx = document.getElementById(id);
+      if (!ctx) return;
+      if (charts[id]) charts[id].destroy();
+      Chart.defaults.color = '#a6adc8';
+      Chart.defaults.borderColor = '#313244';
+      charts[id] = new Chart(ctx, {
+        ...config,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 14 } } },
+          ...(config.options || {})
+        }
+      });
+    }
+
+    async function initSharedSidebar() {
+      try {
+        const [dash, marketRes] = await Promise.all([
+          fetch('/api/dashboard').then(r => r.json()),
+          fetch('/api/market/quotes').then(r => r.json()).catch(() => ({ quotes: [] }))
+        ]);
+
+        const quotes = marketRes.quotes || [];
+        if (quotes.length > 0) {
+          document.getElementById('sidebar-fx').innerHTML = quotes.map(q => {
+            const changeHtml = q.change_pct !== null && q.change_pct !== undefined ? 
+              `<span class="${q.change_pct >= 0 ? 'pos' : 'neg'} ms-1" style="font-size:11px;">
+                ${q.change_pct >= 0 ? '+' : ''}${q.change_pct.toFixed(2)}%
+               </span>` : '';
+            return `
+              <div class="fx-pill">
+                <span>${q.label}</span>
+                <div style="text-align:right;">
+                  <strong>₺${fmtNum(q.price, 2)}</strong>
+                  ${changeHtml}
+                </div>
+              </div>
+            `;
+          }).join('');
+        } else {
+          // Fallback to basic dashboard rates if market quotes fail
+          const rates = dash.rates || {};
+          const keys = ['USD', 'EUR', 'GBP', 'GAUTRY', 'GAGTRY'];
+          const labels = { USD: 'USD/TRY', EUR: 'EUR/TRY', GBP: 'GBP/TRY', GAUTRY: 'Gram Altın', GAGTRY: 'Gram Gümüş' };
+          document.getElementById('sidebar-fx').innerHTML = keys.filter(k => rates[k]).map(k =>
+            `<div class="fx-pill"><span>${labels[k] || k}</span><strong>₺${fmtNum(rates[k], 2)}</strong></div>`
+          ).join('');
+        }
+
+        const dl = document.getElementById('asset-datalist');
+        if(dl) dl.innerHTML = (dash.assets || []).map(a => `<option value="${a.name}">`).join('');
+        return dash;
+      } catch (err) {
+        console.error('Sidebar yükleme hatası:', err);
+      }
+    }
+
+    async function refreshMarket() {
+      const btn = document.getElementById('btn-refresh');
+      btn.disabled = true; btn.textContent = '⏳ Güncelleniyor...';
+      try {
+        const res = await fetch('/api/market/refresh', { method: 'POST' }).then(r => r.json());
+        if (res.ok) {
+          showToast(`Piyasa verileri güncellendi.`);
+          if (typeof loadPageData === 'function') await loadPageData();
+          await initSharedSidebar();
+        } else {
+          showToast(res.error || 'Güncelleme hatası');
+        }
+      } catch (err) {
+        showToast('Bağlantı hatası oluştu.');
+      } finally {
+        btn.disabled = false; btn.textContent = '🔄 Piyasayı Güncelle';
+      }
+    }
+
+    function openAssetModal() {
+      document.getElementById('asset-form').reset();
+      document.getElementById('a-id').value = '';
+      document.getElementById('asset-modal-title').textContent = 'Yeni Varlık Ekle';
+      document.getElementById('asset-modal').classList.add('open');
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
