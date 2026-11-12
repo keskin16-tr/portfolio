@@ -11,28 +11,42 @@ permissions:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python 3.10
+    
+    - name: Set up Python 3.12
       uses: actions/setup-python@v3
       with:
         python-version: "3.12"
         
     - name: Install dependencies
-      run: 
+      run: |
         python -m pip install --upgrade pip
         pip install flask
         pip install pyngrok
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     
-      - name: app.py ve Ngrok Çalıştır
-      run: 
-        # Flask uygulamasını arka planda başlat
-        python app.py
+    - name: app.py ve Ngrok Çalıştır
+      env:
+        # Ngrok token'ınızı GitHub Secrets'a ekleyip buraya bağlamalısınız (Alternatif olarak token'sız kısıtlı çalışır)
+        NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+      run: |
+        # Eğer ngrok token'ınız varsa kaydedin
+        if [ -n "$NGROK_AUTHTOKEN" ]; then
+          ngrok config add-authtoken $NGROK_AUTHTOKEN
+        fi
+
+        # 1. Flask uygulamasını arka planda başlat (& işareti hayati önem taşır)
+        python app.py &
+        
+        # Sunucunun kendine gelmesi için 3 saniye bekle
+        sleep 3
+        
+        # 2. Ngrok ile tünel aç ve URL'i ekrana yazdır
         python -c "from pyngrok import ngrok; public_url = ngrok.connect(5000); print('Public URL:', public_url)"
         
-        # Action'ın hemen kapanmaması için bir süre uyutun veya test edin
-        sleep 30
+        # 3. GitHub Action hemen kapanmasın, tarayıcıdan test edebilmeniz için 5 dakika (300 saniye) açık kalsın
+        sleep 300
+        
