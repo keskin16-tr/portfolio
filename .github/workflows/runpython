@@ -19,9 +19,8 @@ jobs:
     # 2. Adım: Python ortamını kurma
     - name: Python Kur
       uses: actions/setup-python@v5
-      with:
-        python-version: '3.10' # Projenizin kullandığı Python sürümünü buraya yazabilirsiniz (örn: 3.11, 3.12)
-        cache: 'pip' # Pip paket yöneticisi önbelleklemesi
+      run:
+        pkg install python
 
     # 3. Adım: Gerekli kütüphaneleri (bağımlılıkları) yükleme
     - name: Bağımlılıkları Yükle
