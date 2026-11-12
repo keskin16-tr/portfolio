@@ -1,29 +1,37 @@
-name: Python Projesi Çalıştır
+name: Python App CI
 
+# Tetiklenecek olaylar (Hangi durumlarda çalışacağı)
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ] # main veya master branch'ine push yapıldığında
   pull_request:
-    branches: [ "main" ]
-  workflow_dispatch: # GitHub arayüzünden manuel tetikleme sağlar
+    branches: [ "main", "master" ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Çalışacağı sunucu ortamı
 
     steps:
-    - name: Kodu sunucuya çek (Checkout)
+    # 1. Adım: Proje kodunu runner'a (sunucuya) çekme
+    - name: Depodaki Kodları Al
       uses: actions/checkout@v4
 
-    - name: Python ortamını kur
+    # 2. Adım: Python ortamını kurma
+    - name: Python Kur
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11' # Kullanmak istediğiniz sürüm
+        python-version: '3.10' # Projenizin kullandığı Python sürümünü buraya yazabilirsiniz (örn: 3.11, 3.12)
+        cache: 'pip' # Pip paket yöneticisi önbelleklemesi
 
-    - name: Bağımlılıkları yükle
+    # 3. Adım: Gerekli kütüphaneleri (bağımlılıkları) yükleme
+    - name: Bağımlılıkları Yükle
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
 
-    - name: Python betiğini çalıştır
-      run: python app.py
+    # 4. Adım: app.py dosyasını çalıştırma
+    - name: app.py Dosyasını Çalıştır
+      run: |
+        python app.py
