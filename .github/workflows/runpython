@@ -1,4 +1,4 @@
-name: Python App CI
+name: Python App Çalıştır
 
 # Tetiklenecek olaylar (Hangi durumlarda çalışacağı)
 on:
@@ -19,15 +19,19 @@ jobs:
     # 2. Adım: Python ortamını kurma
     - name: Python Kur
       uses: actions/setup-python@v5
-      run:
-        pkg install python
+      with:
+        python-version: '3.12' # Projenizin Python sürümünü buraya yazabilirsiniz (örn: 3.11, 3.12)
+        cache: 'pip'
 
     # 3. Adım: Gerekli kütüphaneleri (bağımlılıkları) yükleme
     - name: Bağımlılıkları Yükle
-      run: 
-        pip install -f requirements.txt
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
 
     # 4. Adım: app.py dosyasını çalıştırma
     - name: app.py Dosyasını Çalıştır
-      run: 
+      run: |
         python app.py
