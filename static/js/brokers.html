@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Hesaplar{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Hesaplar</h1><p>Aracı kurum, borsa ve banka hesaplarınıza göre dağılım</p></div>
+  <div class="actions"><a class="btn primary" href="/manage#assets">+ Varlık ekle</a></div>
+</div>
+<div class="grid g-wide">
+  <div class="card"><div class="card-head"><h2>Hesap payları</h2></div><div id="ch-share"></div></div>
+  <div class="card"><div class="card-head"><h2>Hesap kâr/zarar (₺)</h2></div><div id="ch-pnl"></div></div>
+</div>
+<div id="accounts"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id), open = new Set();
+let D = null;
+function render() {
+  const d = D;
+  Charts.donut($("ch-share"), { items: d.accounts.map((a) => ({ name: a.name, value: a.value })), fmt: (v) => fmt.try(v), center: Charts.compact(d.total_try) + " ₺", empty: "Henüz hesap yok" });
+  Charts.bars($("ch-pnl"), { horizontal: true, labels: d.accounts.map((a) => a.name), values: d.accounts.map((a) => a.profit), fmt: (v) => fmt.signedTry(v), empty: "Henüz hesap yok" });
+  if (!d.accounts.length) { $("accounts").innerHTML = `<div class="card"><div class="empty"><b>Henüz hesap yok</b>Varlık eklerken "Hesap" alanını doldurun.</div></div>`; return; }
+  $("accounts").innerHTML = `<div class="grid g3">${d.accounts.map((a) => `<section class="card kpi" aria-label="${esc(a.name)}">
+      <div class="card-head" style="margin-bottom:4px"><h2>${esc(a.name)}</h2><span class="chip">${a.count} varlık</span></div>
+      <div class="value">${fmt.try(a.value)}</div>
+      <div class="foot"><span class="${cls(a.profit)}">${fmt.signedTry(a.profit)}</span> · ${delta(a.profit_pct)} · portföyün %${nf(1).format(a.share_pct)}</div>
+      <button class="btn sm" style="margin-top:10px" data-acc="${esc(a.name)}" aria-expanded="${open.has(a.name)}">${open.has(a.name) ? "Varlıkları gizle" : "Varlıkları göster"}</button>
+      ${open.has(a.name) ? assetTable(a.name) : ""}</section>`).join("")}</div>`;
+}
+function assetTable(name) {
+  const rows = D.assets.filter((x) => ((x.account || "").trim() || "Belirtilmemiş Hesap") === name).sort((x, y) => y.value_try - x.value_try);
+  return `<div class="table-wrap" style="margin-top:10px"><table><tbody>${rows.map((x) => `<tr><td><div class="name">${esc(x.name)}</div><div class="small">${fmt.num(x.quantity, 6)} adet</div></td><td class="num">${fmt.try(x.value_try)}<div class="small ${cls(x.profit_try)}">${fmt.pct(x.profit_pct)}</div></td></tr>`).join("")}</tbody></table></div>`;
+}
+$("accounts").addEventListener("click", (e) => { const b = e.target.closest("[data-acc]"); if (!b) return; const n = b.dataset.acc; open.has(n) ? open.delete(n) : open.add(n); render(); });
+api("/api/dashboard").then((d) => { D = d; render(); }).catch((e) => toast(e.message, "err"));
+</script>
+{% endblock %}

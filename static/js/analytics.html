@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Analiz{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Analiz</h1><p id="sub">Değer geçmişi, risk ve temettü</p></div></div>
+<section class="grid g4" id="kpis"></section>
+<div class="grid g2">
+  <div class="card"><div class="card-head"><h2>Günlük değişim (%)</h2></div><div id="ch-ret"></div></div>
+  <div class="card"><div class="card-head"><h2>Zirveden düşüş (%)</h2></div><div id="ch-dd"></div></div>
+</div>
+<div class="grid g2">
+  <div class="card"><div class="card-head"><h2>Gerçekleşen / gerçekleşmemiş K/Z</h2></div><div id="ch-pnl"></div></div>
+  <div class="card"><div class="card-head"><h2>Temettü gelirleri (₺)</h2></div><div id="ch-div"></div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+const kpi = (l, v, f, t) => `<div class="card kpi"><div class="label">${l}</div><div class="value ${t || ""}">${v}</div><div class="foot">${f || "&nbsp;"}</div></div>`;
+async function load() {
+  try {
+    const [a, d] = await Promise.all([api("/api/analytics"), api("/api/dashboard")]);
+    const n = a.history.length;
+    $("sub").textContent = n < 2 ? "Risk göstergeleri için en az iki günlük kayıt gerekir" : `${n} günlük kayıt üzerinden`;
+    $("kpis").innerHTML = kpi("Yıllık oynaklık", n > 2 ? `%${nf(2).format(a.annualized_volatility)}` : "—", "Günlük değişimlerden hesaplanır") +
+      kpi("Sharpe oranı", n > 2 ? nf(2).format(a.sharpe) : "—", "Risksiz getiri 0 varsayılır") +
+      kpi("En büyük düşüş", n > 1 ? `%${nf(2).format(a.max_drawdown)}` : "—", "Zirveden dibe", a.max_drawdown < 0 ? "down" : "") +
+      kpi("Toplam K/Z", fmt.signedTry(a.realized_pnl_try + a.unrealized_pnl_try), `Gerçekleşen ${fmt.signedTry(a.realized_pnl_try)}`, cls(a.realized_pnl_try + a.unrealized_pnl_try));
+    const r = a.returns.slice(1);
+    Charts.bars($("ch-ret"), { labels: r.map((x) => fmt.shortDate(x.date)), values: r.map((x) => x.return_pct), fmt: (v) => fmt.pct(v), empty: "En az iki günlük kayıt gerekir" });
+    Charts.line($("ch-dd"), { labels: a.drawdown.map((x) => x.date), xfmt: fmt.shortDate, area: true, series: [{ name: "Düşüş", values: a.drawdown.map((x) => x.drawdown), color: "var(--down)", fmt: (v) => fmt.pct(v) }], empty: "Kayıt yok" });
+    Charts.bars($("ch-pnl"), { labels: ["Gerçekleşen", "Gerçekleşmemiş", "Toplam"], values: [a.realized_pnl_try, a.unrealized_pnl_try, a.realized_pnl_try + a.unrealized_pnl_try], fmt: (v) => fmt.signedTry(v) });
+    Charts.bars($("ch-div"), { horizontal: true, signed: false, labels: d.dividends.map((x) => x.asset_name), values: d.dividends.map((x) => x.total_div), fmt: (v) => fmt.try(v, 2), empty: "Temettü işlemi girildiğinde burada görünür" });
+  } catch (e) { toast(e.message, "err"); }
+}
+load();
+</script>
+{% endblock %}

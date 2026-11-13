@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+{% block title %}Yönetim{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Yönetim</h1><p>Varlıkları, işlemleri ve kurları buradan ekleyin, düzenleyin veya silin.</p></div>
+  <div class="actions">
+    <button class="btn" id="btn-refresh" type="button"></button>
+  </div>
+</div>
+
+<div class="tabs" role="tablist" aria-label="Yönetim bölümleri">
+  <button class="tab" role="tab" id="tab-assets" aria-controls="panel-assets" aria-selected="true" data-tab="assets">Varlıklar<span class="count" id="cnt-assets">0</span></button>
+  <button class="tab" role="tab" id="tab-tx" aria-controls="panel-tx" aria-selected="false" data-tab="tx">İşlemler<span class="count" id="cnt-tx">0</span></button>
+  <button class="tab" role="tab" id="tab-rates" aria-controls="panel-rates" aria-selected="false" data-tab="rates">Kurlar</button>
+  <button class="tab" role="tab" id="tab-backup" aria-controls="panel-backup" aria-selected="false" data-tab="backup">Yedekleme</button>
+</div>
+
+<!-- Varlıklar -->
+<section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets">
+  <div class="toolbar">
+    <input class="input grow" id="a-search" type="search" placeholder="Varlık, sembol veya hesap ara…" aria-label="Varlık ara">
+    <select class="input" id="a-cat" aria-label="Kategori filtresi"></select>
+    <select class="input" id="a-acc" aria-label="Hesap filtresi"></select>
+    <span class="spacer"></span>
+    <button class="btn primary" id="a-new" type="button">+ Yeni varlık</button>
+  </div>
+  <div class="table-wrap"><table id="a-table"></table></div>
+</section>
+
+<!-- İşlemler -->
+<section class="panel" id="panel-tx" role="tabpanel" aria-labelledby="tab-tx" hidden>
+  <div class="toolbar">
+    <input class="input grow" id="t-search" type="search" placeholder="Varlık veya not ara…" aria-label="İşlem ara">
+    <select class="input" id="t-type" aria-label="İşlem türü filtresi">
+      <option value="">Tüm türler</option>
+      <option>Alış</option><option>Satış</option><option>Temettü</option><option>Para girişi</option><option>Para çıkışı</option><option>Transfer</option>
+    </select>
+    <span class="spacer"></span>
+    <button class="btn primary" id="t-new" type="button">+ Yeni işlem</button>
+  </div>
+  <div class="table-wrap"><table id="t-table"></table></div>
+</section>
+
+<!-- Kurlar -->
+<section class="panel" id="panel-rates" role="tabpanel" aria-labelledby="tab-rates" hidden>
+  <div class="grid g-wide">
+    <div class="card">
+      <div class="card-head"><h2>TRY karşılığı kurlar</h2>
+        <div class="actions"><button class="btn" id="r-live" type="button">Canlı kurları çek</button><button class="btn primary" id="r-save" type="button">Değişiklikleri kaydet</button></div>
+      </div>
+      <div class="table-wrap"><table id="r-table"></table></div>
+      <p class="hint">Kur, 1 birimin kaç ₺ ettiğini gösterir. GAUTRY / GAGTRY gram altın ve gümüş fiyatlarıdır.</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Yeni para birimi</h2></div>
+      <form id="r-form" class="form-grid">
+        <div class="field"><label for="r-code">Kod</label><input class="input" id="r-code" maxlength="10" placeholder="CHF" required></div>
+        <div class="field"><label for="r-rate">₺ karşılığı</label><input class="input" id="r-rate" type="number" step="any" min="0" placeholder="38,40" required></div>
+        <div class="full"><button class="btn primary" type="submit">Ekle</button></div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- Yedekleme -->
+<section class="panel" id="panel-backup" role="tabpanel" aria-labelledby="tab-backup" hidden>
+  <div class="grid g2">
+    <div class="card">
+      <div class="card-head"><h2>Excel'e aktar</h2></div>
+      <p class="sub">Tüm varlıklarınız ve işlemleriniz iki sayfalı bir Excel dosyası olarak iner.</p>
+      <a class="btn primary" href="/api/export" download>Yedeği indir (.xlsx)</a>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Excel'den içe aktar</h2></div>
+      <p class="sub">İlk sayfadaki sütun başlıkları okunur: Ad, Sembol, Kategori, Hesap, Miktar, Birim fiyat, Para birimi, Maliyet, Notlar. Aynı ad ve hesaptaki varlıklar atlanır.</p>
+      <form id="imp-form" class="actions">
+        <input class="input" style="max-width:300px" type="file" id="imp-file" accept=".xlsx,.xls" required aria-label="Excel dosyası">
+        <button class="btn primary" type="submit">İçe aktar</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- Varlık penceresi -->
+<dialog id="a-dlg" aria-labelledby="a-dlg-title">
+  <form id="a-form" novalidate>
+    <div class="dlg-head"><h2 id="a-dlg-title">Yeni varlık</h2><button class="btn sm icon" type="button" data-close aria-label="Kapat">✕</button></div>
+    <div class="dlg-body">
+      <div class="form-error" id="a-err" hidden role="alert"></div>
+      <div class="form-grid">
+        <div class="field full"><label for="a-name">Varlık adı *</label><input class="input" id="a-name" required placeholder="Örn. Bitcoin, THYAO, Gram altın"></div>
+        <div class="field"><label for="a-category">Kategori *</label><input class="input" id="a-category" list="dl-cat" required placeholder="Kripto, Hisse, Fon…"></div>
+        <div class="field"><label for="a-account">Hesap / kurum</label><input class="input" id="a-account" list="dl-acc" placeholder="Örn. Binance, Garanti BBVA"></div>
+        <div class="field"><label for="a-qty">Miktar</label><input class="input" id="a-qty" type="number" step="any" min="0" value="0"></div>
+        <div class="field"><label for="a-cur">Para birimi</label><select class="input" id="a-cur"></select></div>
+        <div class="field"><label for="a-price">Güncel birim fiyat</label><input class="input" id="a-price" type="number" step="any" min="0" value="0"></div>
+        <div class="field"><label for="a-cost">Ortalama maliyet (birim)</label><input class="input" id="a-cost" type="number" step="any" min="0" value="0"></div>
+        <div class="field"><label for="a-src">Fiyat kaynağı</label>
+          <select class="input" id="a-src"><option value="manual">Elle gireceğim</option><option value="auto">Otomatik (kategoriye göre)</option><option value="yahoo">Yahoo Finance</option><option value="coingecko">CoinGecko</option></select></div>
+        <div class="field"><label for="a-msym">Piyasa sembolü</label><input class="input" id="a-msym" placeholder="THYAO.IS, BTC, GC=F"></div>
+        <div class="field full"><label for="a-sym">Sembol (görüntü için)</label><input class="input" id="a-sym" placeholder="İsteğe bağlı"></div>
+        <div class="field full"><label for="a-notes">Not</label><textarea class="input" id="a-notes"></textarea></div>
+      </div>
+      <p class="hint">Otomatik fiyat için piyasa sembolü gerekir: hisselerde Yahoo kodu (örn. THYAO.IS), kriptoda coin kodu (örn. BTC). Döviz ve altın/gümüş kategorilerinde sembol gerekmez.</p>
+    </div>
+    <div class="dlg-foot"><button class="btn" type="button" data-close>Vazgeç</button><button class="btn primary" type="submit" id="a-submit">Kaydet</button></div>
+  </form>
+</dialog>
+
+<!-- İşlem penceresi -->
+<dialog id="t-dlg" aria-labelledby="t-dlg-title">
+  <form id="t-form" novalidate>
+    <div class="dlg-head"><h2 id="t-dlg-title">Yeni işlem</h2><button class="btn sm icon" type="button" data-close aria-label="Kapat">✕</button></div>
+    <div class="dlg-body">
+      <div class="form-error" id="t-err" hidden role="alert"></div>
+      <div class="form-grid">
+        <div class="field"><label for="t-kind">İşlem türü *</label>
+          <select class="input" id="t-kind"><option>Alış</option><option>Satış</option><option>Temettü</option><option>Para girişi</option><option>Para çıkışı</option><option>Transfer</option></select></div>
+        <div class="field"><label for="t-date">Tarih *</label><input class="input" id="t-date" type="date" required></div>
+        <div class="field full"><label for="t-asset">Varlık *</label><input class="input" id="t-asset" list="dl-assets" required placeholder="Varlık seçin veya adını yazın" autocomplete="off"></div>
+        <div class="field"><label for="t-qty" id="t-qty-l">Miktar</label><input class="input" id="t-qty" type="number" step="any" min="0" value="0"></div>
+        <div class="field"><label for="t-price" id="t-price-l">Birim fiyat</label><input class="input" id="t-price" type="number" step="any" min="0" value="0"></div>
+        <div class="field"><label for="t-cur">Para birimi</label><select class="input" id="t-cur"></select></div>
+        <div class="field"><label>Tutar</label><div class="input" id="t-total" style="display:flex;align-items:center;background:var(--surface-2)">0</div></div>
+        <div class="field full"><label for="t-notes">Not</label><textarea class="input" id="t-notes"></textarea></div>
+        <label class="check full" id="t-apply-wrap"><input type="checkbox" id="t-apply" checked> Varlığın miktarına ve maliyetine uygula</label>
+      </div>
+      <p class="hint" id="t-hint"></p>
+    </div>
+    <div class="dlg-foot"><button class="btn" type="button" data-close>Vazgeç</button><button class="btn primary" type="submit" id="t-submit">Kaydet</button></div>
+  </form>
+</dialog>
+
+<datalist id="dl-cat"></datalist><datalist id="dl-acc"></datalist><datalist id="dl-assets"></datalist>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const S = { assets: [], txs: [], rates: {}, aSort: { key: "value_try", dir: -1 }, tSort: { key: "transaction_date", dir: -1 }, editA: null, editT: null, rateEdits: {} };
+const $ = (id) => document.getElementById(id);
+const DEFAULT_CATS = ["Kripto", "Hisse", "Fon", "ETF", "Döviz", "Altın", "Gümüş", "Nakit", "Diğer"];
+const SYSTEM_RATES = ["TRY", "USD", "EUR", "GBP", "USDT", "GAUTRY", "GAGTRY"];
+const KIND_CLASS = { "Alış": "buy", "Satış": "sell", "Temettü": "div" };
+
+/* ---------- Veri ---------- */
+async function loadAll() {
+  try {
+    const [a, t] = await Promise.all([api("/api/assets"), api("/api/transactions")]);
+    S.assets = a.assets; S.rates = a.rates; S.txs = t;
+    renderAll();
+  } catch (e) { toast(e.message, "err"); }
+}
+function renderAll() { fillLists(); renderAssets(); renderTx(); renderRates(); $("cnt-assets").textContent = S.assets.length; $("cnt-tx").textContent = S.txs.length; }
+
+function fillLists() {
+  const cats = [...new Set([...DEFAULT_CATS, ...S.assets.map((a) => a.category)])];
+  $("dl-cat").innerHTML = cats.map((c) => `<option value="${esc(c)}">`).join("");
+  const accs = [...new Set(S.assets.map((a) => a.account).filter(Boolean))];
+  $("dl-acc").innerHTML = accs.map((c) => `<option value="${esc(c)}">`).join("");
+  $("dl-assets").innerHTML = S.assets.map((a) => `<option value="${esc(a.name)}">${esc(a.account || "")}</option>`).join("");
+  const cur = Object.keys(S.rates).filter((c) => !["GAUTRY", "GAGTRY"].includes(c));
+  const opts = cur.map((c) => `<option>${esc(c)}</option>`).join("");
+  $("a-cur").innerHTML = opts; $("t-cur").innerHTML = opts;
+  const keep = (sel, html, label) => { const v = sel.value; sel.innerHTML = `<option value="">${label}</option>` + html; sel.value = [...sel.options].some((o) => o.value === v) ? v : ""; };
+  keep($("a-cat"), [...new Set(S.assets.map((a) => a.category))].sort().map((c) => `<option>${esc(c)}</option>`).join(""), "Tüm kategoriler");
+  keep($("a-acc"), accs.sort().map((c) => `<option>${esc(c)}</option>`).join(""), "Tüm hesaplar");
+}
+
+/* ---------- Sekmeler ---------- */
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t.dataset.tab === name));
+  document.querySelectorAll(".panel").forEach((p) => (p.hidden = p.id !== "panel-" + name));
+  history.replaceState(null, "", "#" + name);
+}
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
+document.querySelector(".tabs").addEventListener("keydown", (e) => {
+  const tabs = [...document.querySelectorAll(".tab")], i = tabs.indexOf(document.activeElement);
+  if (i < 0 || !["ArrowRight", "ArrowLeft"].includes(e.key)) return;
+  const n = tabs[(i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length]; n.focus(); showTab(n.dataset.tab);
+});
+
+/* ---------- Varlıklar ---------- */
+function filteredAssets() {
+  const q = $("a-search").value.trim().toLocaleLowerCase("tr"), c = $("a-cat").value, ac = $("a-acc").value;
+  return S.assets.filter((a) => (!c || a.category === c) && (!ac || a.account === ac) &&
+    (!q || [a.name, a.symbol, a.account, a.category, a.market_symbol].some((x) => String(x || "").toLocaleLowerCase("tr").includes(q))));
+}
+function renderAssets() {
+  const rows = sortRows(filteredAssets(), S.aSort), t = $("a-table");
+  if (!S.assets.length) { t.innerHTML = `<tbody><tr><td><div class="empty"><b>Henüz varlık yok</b>İlk varlığınızı ekleyerek başlayın.</div></td></tr></tbody>`; return; }
+  if (!rows.length) { t.innerHTML = `<tbody><tr><td><div class="empty"><b>Sonuç bulunamadı</b>Aramayı veya filtreleri değiştirin.</div></td></tr></tbody>`; return; }
+  const v = rows.reduce((s, a) => s + a.value_try, 0), c = rows.reduce((s, a) => s + a.cost_try, 0), p = v - c;
+  t.innerHTML = `<thead><tr>${sortHead("Varlık", "name", S.aSort)}${sortHead("Kategori", "category", S.aSort)}${sortHead("Hesap", "account", S.aSort)}${sortHead("Miktar", "quantity", S.aSort, true)}${sortHead("Fiyat", "unit_price", S.aSort, true)}${sortHead("Maliyet", "cost_per_unit", S.aSort, true)}${sortHead("Değer (₺)", "value_try", S.aSort, true)}${sortHead("Kâr/Zarar", "profit_try", S.aSort, true)}<th><span class="sr-only" style="position:absolute;left:-9999px">İşlemler</span></th></tr></thead>
+  <tbody>${rows.map((a) => `<tr>
+    <td><div class="name">${esc(a.name)}</div><div class="small">${esc(a.symbol || a.market_symbol || "")}${a.price_source && a.price_source !== "manual" ? " · otomatik fiyat" : ""}</div></td>
+    <td><span class="chip">${esc(a.category)}</span></td>
+    <td>${esc(a.account) || '<span class="muted">—</span>'}</td>
+    <td class="num">${fmt.num(a.quantity, 6)}</td>
+    <td class="num">${fmt.money(a.unit_price, a.currency)}</td>
+    <td class="num">${fmt.money(a.cost_per_unit, a.currency)}</td>
+    <td class="num"><b>${fmt.try(a.value_try)}</b></td>
+    <td class="num"><span class="${cls(a.profit_try)}">${fmt.signedTry(a.profit_try)}</span><div class="small ${cls(a.profit_try)}">${fmt.pct(a.profit_pct)}</div></td>
+    <td><div class="row-actions">
+      <button class="btn sm" data-act="tx" data-id="${a.id}" title="Bu varlık için işlem ekle">İşlem</button>
+      <button class="btn sm" data-act="edit" data-id="${a.id}">Düzenle</button>
+      <button class="btn sm danger" data-act="del" data-id="${a.id}" aria-label="${esc(a.name)} varlığını sil">Sil</button></div></td></tr>`).join("")}</tbody>
+  <tfoot><tr><td colspan="6">Toplam (${rows.length} varlık)</td><td class="num">${fmt.try(v)}</td><td class="num"><span class="${cls(p)}">${fmt.signedTry(p)}</span></td><td></td></tr></tfoot>`;
+  bindSort(t, S.aSort, renderAssets);
+}
+$("a-table").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const a = S.assets.find((x) => x.id == b.dataset.id); if (!a) return;
+  if (b.dataset.act === "edit") openAsset(a);
+  if (b.dataset.act === "tx") openTx(null, a);
+  if (b.dataset.act === "del") {
+    const n = S.txs.filter((t) => t.asset_id === a.id).length;
+    if (!(await confirmBox(`"${a.name}" varlığı silinecek.${n ? ` ${n} işlem kaydı korunur ancak varlıkla bağlantısı kopar.` : ""}`))) return;
+    try { await api("/api/assets/" + a.id, { method: "DELETE" }); toast("Varlık silindi"); await loadAll(); } catch (er) { toast(er.message, "err"); }
+  }
+});
+["a-search", "a-cat", "a-acc"].forEach((id) => $(id).addEventListener("input", renderAssets));
+
+function openAsset(a) {
+  S.editA = a ? a.id : null;
+  $("a-dlg-title").textContent = a ? "Varlığı düzenle" : "Yeni varlık"; $("a-err").hidden = true;
+  const set = (id, v) => ($(id).value = v ?? "");
+  set("a-name", a?.name); set("a-category", a?.category); set("a-account", a?.account); set("a-qty", a ? a.quantity : 0);
+  set("a-price", a ? a.unit_price : 0); set("a-cost", a ? a.cost_per_unit : 0); set("a-msym", a?.market_symbol); set("a-sym", a?.symbol); set("a-notes", a?.notes);
+  if (a && !S.rates[a.currency]) $("a-cur").insertAdjacentHTML("beforeend", `<option>${esc(a.currency)}</option>`);
+  set("a-cur", a ? a.currency : "TRY");
+  const src = a?.price_source || "manual"; if (![...$("a-src").options].some((o) => o.value === src)) $("a-src").insertAdjacentHTML("beforeend", `<option>${esc(src)}</option>`);
+  set("a-src", src);
+  $("a-dlg").showModal(); $("a-name").focus();
+}
+$("a-new").addEventListener("click", () => openAsset(null));
+$("a-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = { name: $("a-name").value, category: $("a-category").value, account: $("a-account").value, quantity: $("a-qty").value, unit_price: $("a-price").value,
+    cost_per_unit: $("a-cost").value, currency: $("a-cur").value, price_source: $("a-src").value, market_symbol: $("a-msym").value, symbol: $("a-sym").value, notes: $("a-notes").value };
+  if (!body.name.trim() || !body.category.trim()) return showErr("a-err", "Varlık adı ve kategorisi zorunludur.");
+  if (body.price_source !== "manual" && !body.market_symbol.trim() && !/döviz|doviz|altın|altin|gümüş|gumus|emtia|metal/i.test(body.category))
+    return showErr("a-err", "Otomatik fiyat için piyasa sembolü girin (örn. THYAO.IS veya BTC) ya da fiyat kaynağını \"Elle gireceğim\" yapın.");
+  const btn = $("a-submit"); btn.disabled = true;
+  try {
+    await api(S.editA ? "/api/assets/" + S.editA : "/api/assets", { method: S.editA ? "PUT" : "POST", body });
+    $("a-dlg").close(); toast(S.editA ? "Varlık güncellendi" : "Varlık eklendi"); await loadAll();
+  } catch (er) { showErr("a-err", er.message); } finally { btn.disabled = false; }
+});
+function showErr(id, msg) { const el = $(id); el.textContent = msg; el.hidden = false; el.scrollIntoView({ block: "nearest" }); }
+document.querySelectorAll("dialog [data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
+document.querySelectorAll("dialog").forEach((d) => d.addEventListener("click", (e) => { if (e.target === d) d.close(); }));
+
+/* ---------- İşlemler ---------- */
+function renderTx() {
+  const q = $("t-search").value.trim().toLocaleLowerCase("tr"), k = $("t-type").value;
+  const rows = sortRows(S.txs.filter((t) => (!k || t.transaction_type === k) && (!q || `${t.asset_name} ${t.notes}`.toLocaleLowerCase("tr").includes(q)))
+    .map((t) => ({ ...t, amount: t.quantity * t.unit_price })), S.tSort);
+  const t = $("t-table");
+  if (!S.txs.length) { t.innerHTML = `<tbody><tr><td><div class="empty"><b>Henüz işlem yok</b>Alış, satış veya temettü kaydı ekleyin.</div></td></tr></tbody>`; return; }
+  if (!rows.length) { t.innerHTML = `<tbody><tr><td><div class="empty"><b>Sonuç bulunamadı</b>Aramayı veya filtreleri değiştirin.</div></td></tr></tbody>`; return; }
+  t.innerHTML = `<thead><tr>${sortHead("Tarih", "transaction_date", S.tSort)}${sortHead("Tür", "transaction_type", S.tSort)}${sortHead("Varlık", "asset_name", S.tSort)}${sortHead("Miktar", "quantity", S.tSort, true)}${sortHead("Fiyat", "unit_price", S.tSort, true)}${sortHead("Tutar", "amount", S.tSort, true)}${sortHead("Gerçekleşen K/Z", "realized_pnl_try", S.tSort, true)}<th>Not</th><th></th></tr></thead>
+  <tbody>${rows.map((x) => `<tr>
+    <td>${fmt.date(x.transaction_date)}</td>
+    <td><span class="chip ${KIND_CLASS[x.transaction_type] || ""}">${esc(x.transaction_type)}</span></td>
+    <td><div class="name">${esc(x.asset_name)}</div>${x.applied ? '<div class="small">bakiyeye uygulandı</div>' : ""}</td>
+    <td class="num">${fmt.num(x.quantity, 6)}</td>
+    <td class="num">${fmt.money(x.unit_price, x.currency)}</td>
+    <td class="num">${fmt.money(x.amount, x.currency)}</td>
+    <td class="num">${x.realized_pnl_try ? `<span class="${cls(x.realized_pnl_try)}">${fmt.signedTry(x.realized_pnl_try)}</span>` : '<span class="muted">—</span>'}</td>
+    <td class="small" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.notes)}">${esc(x.notes)}</td>
+    <td><div class="row-actions"><button class="btn sm" data-act="edit" data-id="${x.id}">Düzenle</button><button class="btn sm danger" data-act="del" data-id="${x.id}" aria-label="İşlemi sil">Sil</button></div></td></tr>`).join("")}</tbody>`;
+  bindSort(t, S.tSort, renderTx);
+}
+["t-search", "t-type"].forEach((id) => $(id).addEventListener("input", renderTx));
+$("t-table").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const x = S.txs.find((t) => t.id == b.dataset.id); if (!x) return;
+  if (b.dataset.act === "edit") openTx(x);
+  if (b.dataset.act === "del") {
+    const msg = x.applied ? `${x.transaction_type} işlemi silinecek ve varlık bakiyesine etkisi geri alınacak.` : `${x.transaction_type} işlemi silinecek.`;
+    if (!(await confirmBox(msg))) return;
+    try { await api("/api/transactions/" + x.id, { method: "DELETE" }); toast("İşlem silindi"); await loadAll(); } catch (er) { toast(er.message, "err"); }
+  }
+});
+
+function openTx(tx, asset) {
+  S.editT = tx ? tx.id : null; $("t-err").hidden = true;
+  $("t-dlg-title").textContent = tx ? "İşlemi düzenle" : "Yeni işlem";
+  $("t-kind").value = tx?.transaction_type || "Alış";
+  $("t-date").value = (tx?.transaction_date || new Date().toISOString()).slice(0, 10);
+  $("t-asset").value = tx?.asset_name || asset?.name || "";
+  $("t-qty").value = tx ? tx.quantity : 0; $("t-price").value = tx ? tx.unit_price : (asset ? asset.unit_price : 0);
+  $("t-notes").value = tx?.notes || "";
+  if (tx && ![...$("t-cur").options].some((o) => o.value === tx.currency)) $("t-cur").insertAdjacentHTML("beforeend", `<option>${esc(tx.currency)}</option>`);
+  $("t-cur").value = tx?.currency || asset?.currency || "TRY";
+  $("t-apply").checked = true; $("t-apply-wrap").style.display = tx ? "none" : "";
+  $("t-hint").textContent = tx && tx.applied ? "Bu işlem varlığın bakiyesine uygulanmıştı. Kaydettiğinizde eski etki geri alınır, yeni değerler yeniden uygulanır." : "";
+  syncTx(); $("t-dlg").showModal(); (asset ? $("t-qty") : $("t-asset")).focus();
+}
+function matchAsset() { const n = $("t-asset").value.trim().toLocaleLowerCase("tr"); return S.assets.find((a) => a.name.toLocaleLowerCase("tr") === n); }
+function syncTx() {
+  const k = $("t-kind").value, a = matchAsset(), money = ["Para girişi", "Para çıkışı", "Transfer"].includes(k);
+  $("t-qty-l").textContent = k === "Temettü" ? "Hisse adedi" : money ? "Adet" : "Miktar";
+  $("t-price-l").textContent = k === "Temettü" ? "Hisse başı temettü" : money ? "Tutar" : "Birim fiyat";
+  $("t-total").textContent = fmt.money((+$("t-qty").value || 0) * (+$("t-price").value || 0), $("t-cur").value);
+  const tradable = ["Alış", "Satış"].includes(k);
+  if (!S.editT) $("t-apply-wrap").style.display = tradable && a ? "" : "none";
+  if (!S.editT && !$("t-hint").dataset.lock) $("t-hint").textContent = tradable && !a && $("t-asset").value.trim() ? "Bu ada sahip bir varlık yok; işlem yalnızca kayıt olarak eklenir, bakiyeyi değiştirmez." : (k === "Satış" && a ? `Mevcut bakiye: ${fmt.num(a.quantity, 6)}` : "");
+}
+$("t-asset").addEventListener("change", () => { const a = matchAsset(); if (a) { $("t-cur").value = a.currency; if (!+$("t-price").value) $("t-price").value = a.unit_price; } syncTx(); });
+["t-kind", "t-qty", "t-price", "t-cur", "t-asset"].forEach((id) => $(id).addEventListener("input", syncTx));
+$("t-new").addEventListener("click", () => openTx(null));
+$("t-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const a = matchAsset();
+  const body = { transaction_type: $("t-kind").value, transaction_date: $("t-date").value, asset_name: $("t-asset").value.trim(), asset_id: a ? a.id : null,
+    quantity: $("t-qty").value, unit_price: $("t-price").value, currency: $("t-cur").value, notes: $("t-notes").value, apply: $("t-apply").checked };
+  if (!body.asset_name) return showErr("t-err", "Varlık adı zorunludur.");
+  if (!body.transaction_date) return showErr("t-err", "Tarih seçin.");
+  const btn = $("t-submit"); btn.disabled = true;
+  try {
+    await api(S.editT ? "/api/transactions/" + S.editT : "/api/transactions", { method: S.editT ? "PUT" : "POST", body });
+    $("t-dlg").close(); toast(S.editT ? "İşlem güncellendi" : "İşlem eklendi"); await loadAll();
+  } catch (er) { showErr("t-err", er.message); } finally { btn.disabled = false; }
+});
+
+/* ---------- Kurlar ---------- */
+function renderRates() {
+  const entries = Object.entries(S.rates).sort((a, b) => a[0].localeCompare(b[0]));
+  $("r-table").innerHTML = `<thead><tr><th>Kod</th><th class="num">₺ karşılığı</th><th></th></tr></thead><tbody>${entries.map(([c, v]) => `<tr>
+    <td><b>${esc(c)}</b>${SYSTEM_RATES.includes(c) ? ' <span class="small">sistem</span>' : ""}</td>
+    <td class="num"><input class="input" style="max-width:150px;text-align:right" type="number" step="any" min="0" data-code="${esc(c)}" value="${+(+v).toFixed(6)}" ${c === "TRY" ? "disabled" : ""} aria-label="${esc(c)} kuru"></td>
+    <td><div class="row-actions">${SYSTEM_RATES.includes(c) ? "" : `<button class="btn sm danger" data-del="${esc(c)}">Sil</button>`}</div></td></tr>`).join("")}</tbody>`;
+}
+$("r-table").addEventListener("input", (e) => { if (e.target.dataset.code) S.rateEdits[e.target.dataset.code] = e.target.value; });
+$("r-table").addEventListener("click", async (e) => {
+  const c = e.target.dataset.del; if (!c) return;
+  if (!(await confirmBox(`${c} kuru silinecek.`))) return;
+  try { await api("/api/rates/" + encodeURIComponent(c), { method: "DELETE" }); toast("Kur silindi"); await loadAll(); } catch (er) { toast(er.message, "err"); }
+});
+$("r-save").addEventListener("click", async () => {
+  if (!Object.keys(S.rateEdits).length) return toast("Değişiklik yok");
+  try { await api("/api/rates", { method: "POST", body: S.rateEdits }); S.rateEdits = {}; toast("Kurlar kaydedildi"); await loadAll(); } catch (er) { toast(er.message, "err"); }
+});
+$("r-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try { await api("/api/rates", { method: "POST", body: { [$("r-code").value.trim().toUpperCase()]: $("r-rate").value } }); e.target.reset(); toast("Para birimi eklendi"); await loadAll(); } catch (er) { toast(er.message, "err"); }
+});
+$("r-live").addEventListener("click", (e) => refreshMarket(e.currentTarget, loadAll));
+$("btn-refresh").innerHTML = ICON_REFRESH + " Fiyatları güncelle";
+$("btn-refresh").addEventListener("click", (e) => refreshMarket(e.currentTarget, loadAll));
+
+/* ---------- Yedekleme ---------- */
+$("imp-form").addEventListener("submit", async (e) => {
+  e.preventDefault(); const f = $("imp-file").files[0]; if (!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  try { const r = await api("/api/import", { method: "POST", body: fd }); toast(`${r.imported} varlık eklendi${r.skipped ? `, ${r.skipped} tekrar atlandı` : ""}`); e.target.reset(); await loadAll(); showTab("assets"); }
+  catch (er) { toast(er.message, "err"); }
+});
+
+/* ---------- Başlat ---------- */
+const initial = location.hash.slice(1); if (["assets", "tx", "rates", "backup"].includes(initial)) showTab(initial);
+loadAll();
+</script>
+{% endblock %}

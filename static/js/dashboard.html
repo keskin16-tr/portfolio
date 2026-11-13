@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Genel bakış{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Genel bakış</h1><p id="sub">Portföyünüzün güncel durumu</p></div>
+  <div class="actions"><span class="muted" id="q-updated"></span><button class="btn" id="btn-refresh" type="button"></button><a class="btn primary" href="/manage#tx">+ İşlem ekle</a></div>
+</div>
+
+<section aria-label="Piyasa fiyatları">
+  <div class="grid g4" id="quotes">
+    {% for i in range(4) %}<div class="card quote"><div class="skeleton" style="height:18px;width:50%"></div><div class="skeleton" style="height:28px;width:70%"></div><div class="skeleton" style="height:34px"></div></div>{% endfor %}
+  </div>
+</section>
+
+<section class="grid g4" aria-label="Özet" id="kpis"></section>
+
+<div class="grid g-wide">
+  <div class="card"><div class="card-head"><h2>Portföy değeri</h2><span class="muted" id="hist-note"></span></div><div id="ch-history"></div></div>
+  <div class="card"><div class="card-head"><h2>Kategori dağılımı</h2></div><div id="ch-cat"></div></div>
+</div>
+
+<div class="grid g3">
+  <div class="card"><div class="card-head"><h2>Para birimi dağılımı</h2></div><div id="ch-cur"></div></div>
+  <div class="card"><div class="card-head"><h2>En çok kazandıran / kaybettiren</h2></div><div id="ch-pnl"></div></div>
+  <div class="card"><div class="card-head"><h2>Hesaplara göre değer</h2></div><div id="ch-acc"></div></div>
+</div>
+
+<div class="grid g-wide">
+  <div class="card"><div class="card-head"><h2>Aylık gerçekleşen kâr/zarar</h2></div><div id="ch-month"></div></div>
+  <div class="card"><div class="card-head"><h2>Son işlemler</h2><a href="/manage#tx">Tümü</a></div><div id="recent"></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+let D = null;
+const KIND_CLASS = { "Alış": "buy", "Satış": "sell", "Temettü": "div" };
+
+/* ---------- Piyasa kartları ---------- */
+function quoteCard(q) {
+  const up = q.change_pct > 0, down = q.change_pct < 0;
+  const priceTxt = q.price ? nf(q.key === "usd" || q.key === "eur" ? 4 : 2).format(q.price) : "—";
+  const extra = q.ons_usd ? `Ons: $${nf(2).format(q.ons_usd)}${q.ons_change_pct != null ? ` (${fmt.pct(q.ons_change_pct)})` : ""}` : q.source;
+  return `<div class="card quote">
+    <div class="top"><span>${esc(q.label)}</span>${delta(q.change_pct)}</div>
+    <div class="row"><div><div class="price">${priceTxt}<small>${esc(q.unit)}</small></div>
+      <div class="meta">${q.change_abs != null ? `Dün: ${nf(q.key === "usd" || q.key === "eur" ? 4 : 2).format(q.prev)}` : "Günlük değişim alınamadı"}</div></div>
+      <div class="spark" data-spark="${q.key}" aria-hidden="true"></div></div>
+    <div class="meta">${esc(extra)}</div></div>`;
+}
+async function loadQuotes(force) {
+  try {
+    const r = await api("/api/market/quotes" + (force ? "?force=1" : ""));
+    $("quotes").innerHTML = r.quotes.map(quoteCard).join("");
+    r.quotes.forEach((q) => { const el = document.querySelector(`[data-spark="${q.key}"]`); if (el) Charts.spark(el, q.series.map((p) => p.v), q.change_pct < 0 ? "--down" : "--up"); });
+    window.__quotes = r;
+    $("q-updated").textContent = "Piyasa: " + fmt.time(r.updated_at);
+    const failed = Object.keys(r.errors || {}).length;
+    if (failed) $("q-updated").textContent += ` · ${failed} kaynak alınamadı`;
+  } catch (e) { $("quotes").innerHTML = `<div class="card full" style="grid-column:1/-1"><div class="empty"><b>Piyasa fiyatları alınamadı</b>${esc(e.message)}</div></div>`; }
+}
+document.addEventListener("themechange", () => { if (window.__quotes) window.__quotes.quotes.forEach((q) => { const el = document.querySelector(`[data-spark="${q.key}"]`); if (el) Charts.spark(el, q.series.map((p) => p.v), q.change_pct < 0 ? "--down" : "--up"); }); });
+
+/* ---------- Portföy ---------- */
+function kpi(label, value, foot, tone) { return `<div class="card kpi"><div class="label">${label}</div><div class="value ${tone || ""}">${value}</div><div class="foot">${foot || "&nbsp;"}</div></div>`; }
+function render(d) {
+  D = d;
+  const empty = !d.assets.length;
+  $("sub").textContent = empty ? "Henüz varlık eklenmemiş" : `${d.asset_count} varlık · ${d.accounts.length} hesap`;
+  const last = d.history.length > 1 ? d.history[d.history.length - 2] : null, dayChg = last && last.total_try ? (d.total_try / last.total_try - 1) * 100 : null;
+  $("kpis").innerHTML =
+    kpi("Toplam değer", fmt.try(d.total_try), dayChg != null ? `Önceki kayda göre ${delta(dayChg)}` : "") +
+    kpi("Toplam maliyet", fmt.try(d.cost_try), `${d.asset_count} varlık`) +
+    kpi("Gerçekleşmemiş K/Z", fmt.signedTry(d.unrealized_pnl_try), delta(d.profit_pct), cls(d.unrealized_pnl_try)) +
+    kpi("Gerçekleşen K/Z", fmt.signedTry(d.realized_pnl_try), `Toplam K/Z: <span class="${cls(d.total_pnl_try)}">${fmt.signedTry(d.total_pnl_try)}</span>`, cls(d.realized_pnl_try));
+
+  const h = d.history;
+  $("hist-note").textContent = h.length ? `${h.length} kayıt` : "";
+  Charts.line($("ch-history"), { labels: h.map((x) => x.snapshot_date), xfmt: fmt.shortDate, area: true, height: 260, label: "Portföy değeri",
+    series: [{ name: "Değer", values: h.map((x) => x.total_try), fmt: (v) => fmt.try(v) }, { name: "Maliyet", values: h.map((x) => x.total_cost_try), fmt: (v) => fmt.try(v), color: "var(--muted)" }],
+    empty: "Değer geçmişi, varlık ekledikçe veya fiyat güncelledikçe oluşur." });
+  Charts.donut($("ch-cat"), { items: d.categories, fmt: (v) => fmt.try(v), center: Charts.compact(d.total_try) + " ₺", label: "Kategori dağılımı", empty: "Varlık ekleyin" });
+  Charts.donut($("ch-cur"), { items: d.exposure, fmt: (v) => fmt.try(v), center: Charts.compact(d.total_try) + " ₺", label: "Para birimi dağılımı", empty: "Varlık ekleyin" });
+
+  const withCost = d.assets.filter((a) => a.cost_try > 0).sort((a, b) => b.profit_try - a.profit_try);
+  const pick = withCost.length > 8 ? [...withCost.slice(0, 4), ...withCost.slice(-4)] : withCost;
+  Charts.bars($("ch-pnl"), { horizontal: true, labels: pick.map((a) => a.name), values: pick.map((a) => a.profit_try), fmt: (v) => fmt.signedTry(v), label: "Varlık bazlı kâr/zarar", empty: "Maliyet bilgisi olan varlık yok" });
+  Charts.bars($("ch-acc"), { horizontal: true, signed: false, labels: d.accounts.map((a) => a.name), values: d.accounts.map((a) => a.value), fmt: (v) => fmt.try(v), label: "Hesap değerleri", empty: "Varlık ekleyin" });
+  Charts.bars($("ch-month"), { labels: d.monthly_realized.map((m) => m.month), values: d.monthly_realized.map((m) => m.realized), fmt: (v) => fmt.signedTry(v), label: "Aylık gerçekleşen K/Z", empty: "Satış veya temettü işlemi girildiğinde burada görünür" });
+
+  $("recent").innerHTML = d.transactions.length
+    ? `<div class="table-wrap"><table><tbody>${d.transactions.slice(0, 8).map((t) => `<tr><td><div class="name">${esc(t.asset_name)}</div><div class="small">${fmt.date(t.transaction_date)}</div></td>
+        <td><span class="chip ${KIND_CLASS[t.transaction_type] || ""}">${esc(t.transaction_type)}</span></td>
+        <td class="num">${fmt.money(t.quantity * t.unit_price, t.currency)}</td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty"><b>Henüz işlem yok</b><a href="/manage#tx">İlk işlemi ekleyin</a></div>`;
+}
+async function loadPortfolio() { try { render(await api("/api/dashboard")); } catch (e) { toast(e.message, "err"); } }
+
+$("btn-refresh").innerHTML = ICON_REFRESH + " Fiyatları güncelle";
+$("btn-refresh").addEventListener("click", (e) => refreshMarket(e.currentTarget, async () => { await Promise.all([loadPortfolio(), loadQuotes(true)]); }));
+loadPortfolio(); loadQuotes();
+setInterval(() => { if (!document.hidden) loadQuotes(); }, 90000);
+</script>
+{% endblock %}

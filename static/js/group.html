@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ group_title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{{ group_title }}</h1><p id="sub">{{ group_sub }}</p></div>
+  <div class="actions"><button class="btn" id="btn-refresh" type="button"></button><a class="btn primary" href="/manage#assets">+ Varlık ekle</a></div>
+</div>
+<section class="grid g4" id="kpis"></section>
+<div class="grid g2">
+  <div class="card"><div class="card-head"><h2>Ağırlık</h2></div><div id="ch-weight"></div></div>
+  <div class="card"><div class="card-head"><h2>Kâr/zarar (₺)</h2></div><div id="ch-pnl"></div></div>
+</div>
+<div class="card">
+  <div class="card-head"><h2>Varlıklar</h2><input class="input" id="q" type="search" placeholder="Ara…" style="max-width:220px" aria-label="Ara"></div>
+  <div class="table-wrap"><table id="tbl"></table></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const GROUP = "{{ group_key }}", $ = (id) => document.getElementById(id), st = { key: "value_try", dir: -1 };
+let G = null;
+const kpi = (l, v, f, t) => `<div class="card kpi"><div class="label">${l}</div><div class="value ${t || ""}">${v}</div><div class="foot">${f || "&nbsp;"}</div></div>`;
+function table() {
+  const q = $("q").value.trim().toLocaleLowerCase("tr");
+  const rows = sortRows(G.assets.filter((a) => !q || `${a.name} ${a.symbol} ${a.account}`.toLocaleLowerCase("tr").includes(q)), st);
+  if (!G.assets.length) { $("tbl").innerHTML = `<tbody><tr><td><div class="empty"><b>Bu grupta varlık yok</b><a href="/manage#assets">Varlık ekleyin</a>. Kategoriyi ${GROUP === "crypto" ? "\"Kripto\"" : "\"Hisse\", \"Fon\" veya \"ETF\""} olarak seçin.</div></td></tr></tbody>`; return; }
+  $("tbl").innerHTML = `<thead><tr>${sortHead("Varlık", "name", st)}${sortHead("Hesap", "account", st)}${sortHead("Miktar", "quantity", st, true)}${sortHead("Fiyat", "unit_price", st, true)}${sortHead("Maliyet", "cost_per_unit", st, true)}${sortHead("Değer (₺)", "value_try", st, true)}${sortHead("K/Z", "profit_try", st, true)}${sortHead("K/Z %", "profit_pct", st, true)}</tr></thead>
+  <tbody>${rows.map((a) => `<tr><td><div class="name">${esc(a.name)}</div><div class="small">${esc(a.symbol || a.market_symbol || a.category)}</div></td><td>${esc(a.account) || "—"}</td>
+    <td class="num">${fmt.num(a.quantity, 6)}</td><td class="num">${fmt.money(a.unit_price, a.currency)}</td><td class="num">${fmt.money(a.cost_per_unit, a.currency)}</td>
+    <td class="num"><b>${fmt.try(a.value_try)}</b></td><td class="num ${cls(a.profit_try)}">${fmt.signedTry(a.profit_try)}</td><td class="num">${delta(a.profit_pct)}</td></tr>`).join("")}</tbody>`;
+  bindSort($("tbl"), st, table);
+}
+function render() {
+  const g = G[GROUP];
+  $("kpis").innerHTML = kpi("Toplam değer", fmt.try(g.value_try), `Portföy payı: %${nf(1).format(g.portfolio_share_pct)}`) + kpi("Maliyet", fmt.try(g.cost_try), `${g.count} varlık`) +
+    kpi("Kâr/zarar", fmt.signedTry(g.profit_try), delta(g.profit_pct), cls(g.profit_try)) + kpi("En büyük pozisyon", g.assets[0] ? esc(g.assets[0].name) : "—", g.assets[0] ? fmt.try(g.assets[0].value_try) : "");
+  Charts.donut($("ch-weight"), { items: g.assets.map((a) => ({ name: a.name, value: a.value_try })), fmt: (v) => fmt.try(v), center: Charts.compact(g.value_try) + " ₺", empty: "Varlık yok" });
+  const p = [...g.assets].sort((a, b) => b.profit_try - a.profit_try);
+  Charts.bars($("ch-pnl"), { horizontal: true, labels: p.map((a) => a.name), values: p.map((a) => a.profit_try), fmt: (v) => fmt.signedTry(v), empty: "Varlık yok" });
+  table();
+}
+async function load() { try { G = await api("/api/breakdown"); render(); } catch (e) { toast(e.message, "err"); } }
+$("q").addEventListener("input", () => G && table());
+$("btn-refresh").innerHTML = ICON_REFRESH + " Fiyatları güncelle";
+$("btn-refresh").addEventListener("click", (e) => refreshMarket(e.currentTarget, load));
+load();
+</script>
+{% endblock %}

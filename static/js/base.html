@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Portföy{% endblock %} · Portföy Takibi</title>
+  <script>
+    /* Tema, sayfa çizilmeden önce uygulanır (yanıp sönmeyi önler) */
+    try { var t = localStorage.getItem("portfolio-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><i></i><span>Portföy</span></div>
+    <nav class="nav" aria-label="Ana menü">
+      {% set items = [
+        ('dashboard', '/', 'Genel bakış', '<path d="M3 12 12 4l9 8"/><path d="M5 10v10h14V10"/>'),
+        ('crypto', '/crypto', 'Kripto', '<circle cx="12" cy="12" r="9"/><path d="M9.5 8h4a2 2 0 0 1 0 4h-4m0 0h4.5a2 2 0 0 1 0 4H9.5M9.5 7v10"/>'),
+        ('equities', '/equities', 'Hisse & Fon', '<path d="M3 17l5-6 4 4 8-9"/><path d="M15 6h5v5"/>'),
+        ('brokers', '/brokers', 'Hesaplar', '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/>'),
+        ('analytics', '/analytics', 'Analiz', '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>'),
+        ('manage', '/manage', 'Yönetim', '<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/>')
+      ] %}
+      {% for key, href, label, icon in items %}
+        <a href="{{ href }}" {% if active_page == key %}aria-current="page"{% endif %}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon|safe }}</svg><span>{{ label }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      <button class="btn" id="theme-toggle" type="button" aria-pressed="false">
+        <svg class="t-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        <svg class="t-sun" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <span class="t-label">Koyu tema</span>
+      </button>
+    </div>
+  </aside>
+  <main class="main" id="main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
