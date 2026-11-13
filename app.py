@@ -430,4 +430,619 @@ def add_transaction():
             con.execute("""INSERT INTO transactions(asset_id,asset_name,transaction_type,quantity,unit_price,currency,
                 transaction_date,notes,created_at,applied,realized_pnl,realized_pnl_try)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                asset["id"] if asset else None, asset["name"] if asset else 
+                asset["id"] if asset else None, asset["name"] if asset else p["name"], p["kind"], p["qty"], p["price"],
+                currency, p["date"], p["notes"], _now(), applied, realized, realized_try))
+            save_snapshot(con)
+        return jsonify(ok=True, realized_pnl=realized, realized_pnl_try=realized_try)
+    except TxError as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@app.route("/api/transactions/<int:tx_id>", methods=["PUT", "DELETE"])
+def modify_transaction(tx_id):
+    try:
+        with db() as con:
+            tx = con.execute("SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone()
+            if not tx:
+                return jsonify(error="İşlem bulunamadı."), 404
+            rates = fx_map(con)
+            orig_asset = con.execute("SELECT * FROM assets WHERE id=?", (tx["asset_id"],)).fetchone() if tx["asset_id"] else None
+            reapply = bool(tx["applied"]) and orig_asset is not None
+
+            if request.method == "DELETE":
+                if reapply:
+                    _revert_tx(con, tx, orig_asset)
+                con.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
+                save_snapshot(con)
+                return jsonify(ok=True)
+
+            p = _tx_payload(request.get_json(force=True))
+            if reapply:
+                _revert_tx(con, tx, orig_asset)
+            asset = _find_asset(con, p["asset_id"], p["name"])
+            currency = p["currency"] or (asset["currency"] if asset else tx["currency"])
+            if currency not in rates:
+                raise TxError(f"'{currency}' için kur tanımlı değil.")
+            realized = realized_try = 0.0
+            applied = 0
+            if p["kind"] in ("Alış", "Satış"):
+                if reapply and not asset:
+                    raise TxError("Bu işlem bir varlığın bakiyesine uygulanmış; varlık adı mevcut bir varlıkla eşleşmeli.")
+                if asset:
+                    if currency != asset["currency"]:
+                        raise TxError(f"İşlem para birimi varlığın para birimiyle aynı olmalı ({asset['currency']}).")
+                    if reapply:
+                        realized, realized_try = _apply_tx(con, asset, p["kind"], p["qty"], p["price"], currency, rates)
+                        applied = 1
+                    elif p["kind"] == "Satış":
+                        realized, realized_try = _sale_pnl(asset, p["qty"], p["price"], currency, rates)
+            elif p["kind"] == "Temettü":
+                realized = p["qty"] * p["price"]
+                realized_try = realized * rates.get(currency, 1.0)
+            con.execute("""UPDATE transactions SET asset_id=?,asset_name=?,transaction_type=?,quantity=?,unit_price=?,
+                currency=?,transaction_date=?,notes=?,applied=?,realized_pnl=?,realized_pnl_try=? WHERE id=?""", (
+                asset["id"] if asset else None, asset["name"] if asset else p["name"], p["kind"], p["qty"], p["price"],
+                currency, p["date"], p["notes"], applied, realized, realized_try, tx_id))
+            save_snapshot(con)
+        return jsonify(ok=True)
+    except TxError as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@app.get("/api/transactions")
+def transactions():
+    with db() as con:
+        return jsonify([dict(r) for r in con.execute("SELECT * FROM transactions ORDER BY transaction_date DESC,id DESC")])
+
+
+# ----------------------------------------------------------------------------
+# Kurlar
+# ----------------------------------------------------------------------------
+@app.route("/api/rates", methods=["GET", "POST"])
+def rates_api():
+    if request.method == "POST":
+        d = request.get_json(force=True)
+        if not isinstance(d, dict):
+            return jsonify(error="Geçersiz istek."), 400
+        parsed = {}
+        for cur, value in d.items():
+            code = str(cur).strip().upper()
+            if not code:
+                continue
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                return jsonify(error=f"{code} için geçersiz kur."), 400
+            if val <= 0:
+                return jsonify(error="Kur sıfırdan büyük olmalı."), 400
+            if code != "TRY":
+                parsed[code] = val
+        with db() as con:
+            now = _now()
+            for code, val in parsed.items():
+                con.execute("INSERT INTO fx_rates(currency,try_rate,updated_at) VALUES(?,?,?) ON CONFLICT(currency) DO UPDATE SET try_rate=excluded.try_rate,updated_at=excluded.updated_at",
+                            (code, val, now))
+            save_snapshot(con)
+            return jsonify(fx_map(con))
+    with db() as con:
+        return jsonify(fx_map(con))
+
+
+@app.delete("/api/rates/<code>")
+def delete_rate(code):
+    code = code.strip().upper()
+    if code in ("TRY", "USD", "EUR", "GBP", "USDT", "GAUTRY", "GAGTRY"):
+        return jsonify(error="Bu kur sistem tarafından kullanıldığı için silinemez."), 400
+    with db() as con:
+        used = con.execute("SELECT COUNT(*) FROM assets WHERE upper(currency)=?", (code,)).fetchone()[0]
+        if used:
+            return jsonify(error=f"{used} varlık bu para birimini kullanıyor; önce onları değiştirin."), 400
+        con.execute("DELETE FROM fx_rates WHERE currency=?", (code,))
+    return jsonify(ok=True)
+
+
+# ----------------------------------------------------------------------------
+# Analitik / Temettü
+# ----------------------------------------------------------------------------
+@app.get("/api/analytics")
+def analytics():
+    with db() as con:
+        snaps = [dict(r) for r in con.execute("SELECT * FROM snapshots ORDER BY snapshot_date")]
+        txs = [dict(r) for r in con.execute("SELECT * FROM transactions ORDER BY transaction_date")]
+        assets, rates, total, cost, realized = portfolio_totals(con)
+    returns, drawdown = [], []
+    peak = 0.0
+    prev = None
+    for s in snaps:
+        val = float(s["total_try"])
+        peak = max(peak, val)
+        dd = ((val / peak) - 1) * 100 if peak else 0
+        drawdown.append({"date": s["snapshot_date"], "drawdown": dd})
+        daily = ((val / prev) - 1) * 100 if prev else 0
+        returns.append({"date": s["snapshot_date"], "return_pct": daily, "value": val})
+        prev = val
+    series = [x["return_pct"] for x in returns[1:]]
+    avg = sum(series) / len(series) if series else 0
+    variance = sum((x - avg) ** 2 for x in series) / len(series) if series else 0
+    vol = variance ** 0.5 * (252 ** 0.5)
+    sharpe = (avg * 252 ** 0.5 / (variance ** 0.5)) if variance > 0 else 0
+    max_dd = min((x["drawdown"] for x in drawdown), default=0)
+    realized_total = sum(float(t.get("realized_pnl_try") or 0) for t in txs)
+    return jsonify(history=snaps, returns=returns, drawdown=drawdown, annualized_volatility=vol,
+        sharpe=sharpe, max_drawdown=max_dd, realized_pnl_try=realized_total,
+        unrealized_pnl_try=total - cost, total_try=total, total_cost_try=cost)
+
+
+@app.get("/api/dividends")
+def dividends_api():
+    with db() as con:
+        rows = [dict(r) for r in con.execute("""SELECT d.*,a.name,a.symbol,a.quantity FROM dividend_events d
+            JOIN assets a ON a.id=d.asset_id ORDER BY d.event_date DESC LIMIT 1000""")]
+        totals = {}
+        for row in rows:
+            key = row["name"]
+            totals[key] = totals.get(key, 0.0) + float(row["amount_per_share"] or 0) * float(row["quantity"] or 0)
+    return jsonify(events=rows, estimated_by_asset=[{"name": k, "estimated": v} for k, v in totals.items()], count=len(rows))
+
+
+# ----------------------------------------------------------------------------
+# Piyasa verisi
+# ----------------------------------------------------------------------------
+def _http_json(url: str, *, params=None, timeout=12):
+    response = requests.get(url, params=params, timeout=timeout, headers={
+        "User-Agent": "PortfolioIntelligence/5.0 (+market-data)",
+        "Accept": "application/json"
+    })
+    response.raise_for_status()
+    return response.json()
+
+
+COIN_IDS = {
+    "BTC": "bitcoin", "XBT": "bitcoin", "ETH": "ethereum", "SOL": "solana",
+    "BNB": "binancecoin", "XRP": "ripple", "ADA": "cardano", "DOGE": "dogecoin",
+    "AVAX": "avalanche-2", "DOT": "polkadot", "LINK": "chainlink", "TRX": "tron",
+    "TON": "the-open-network", "SHIB": "shiba-inu", "LTC": "litecoin",
+    "BCH": "bitcoin-cash", "ATOM": "cosmos", "NEAR": "near", "APT": "aptos",
+    "SUI": "sui", "USDT": "tether", "USDC": "usd-coin"
+}
+
+
+def _coin_id(symbol: str) -> str:
+    raw = (symbol or "").strip()
+    return COIN_IDS.get(raw.upper(), raw.lower())
+
+
+def _coingecko_prices(ids: list[str]) -> dict[str, float]:
+    """Birden çok coin için USD fiyatını tek istekte alır."""
+    payload = _http_json("https://api.coingecko.com/api/v3/simple/price",
+                         params={"ids": ",".join(ids), "vs_currencies": "usd"}, timeout=18)
+    out = {}
+    for cid in ids:
+        value = (payload.get(cid) or {}).get("usd")
+        if value is not None and float(value) > 0:
+            out[cid] = float(value)
+    return out
+
+
+def _yahoo_chart(symbol: str, rng: str = "1mo", interval: str = "1d") -> dict:
+    """Yahoo Finance günlük grafik verisi: güncel fiyat, önceki kapanış, kapanış serisi, para birimi."""
+    symbol = (symbol or "").strip()
+    if not symbol:
+        raise RuntimeError("Yahoo Finance sembolü boş.")
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol, safe='')}"
+    payload = _http_json(url, params={"range": rng, "interval": interval}, timeout=14)
+    result = (payload.get("chart", {}).get("result") or [None])[0]
+    if not result:
+        raise RuntimeError(f"Yahoo Finance '{symbol}' için veri döndürmedi.")
+    meta = result.get("meta") or {}
+    stamps = result.get("timestamp") or []
+    closes = ((result.get("indicators", {}).get("quote") or [{}])[0]).get("close") or []
+    offset = int(meta.get("gmtoffset") or 0)
+    series = []
+    for t, c in zip(stamps, closes):
+        if c is None:
+            continue
+        day = datetime.fromtimestamp(t + offset, tz=timezone.utc).date().isoformat()
+        series.append((day, float(c), t))
+    price = meta.get("regularMarketPrice")
+    if price is None and series:
+        price = series[-1][1]
+    if price is None or float(price) <= 0:
+        raise RuntimeError(f"Yahoo Finance '{symbol}' için fiyat döndürmedi.")
+    prev = None
+    if series:
+        last_t = series[-1][2]
+        mtime = meta.get("regularMarketTime")
+        today_bar = mtime is not None and last_t <= mtime < last_t + 86400
+        if today_bar:
+            prev = series[-2][1] if len(series) >= 2 else None
+        else:
+            prev = series[-1][1]
+    if prev is None:
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+    return {
+        "symbol": symbol, "price": float(price), "prev": float(prev) if prev else None,
+        "series": [(d, c) for d, c, _ in series], "currency": meta.get("currency"),
+    }
+
+
+def _yahoo_price(symbol: str) -> float:
+    symbol = (symbol or "").strip().upper()
+    if not symbol:
+        raise RuntimeError("Yahoo Finance sembolü boş.")
+    try:
+        return _yahoo_chart(symbol, "5d")["price"]
+    except Exception:
+        pass
+    try:
+        import yfinance as yf
+        value = yf.Ticker(symbol).fast_info.get("last_price")
+        if value and float(value) > 0:
+            return float(value)
+    except Exception as exc:
+        raise RuntimeError(f"Yahoo Finance erişilemedi: {str(exc)[:100]}")
+    raise RuntimeError(f"Yahoo Finance '{symbol}' için fiyat döndürmedi.")
+
+
+def _get_fx_rates() -> tuple[dict, str]:
+    try:
+        data = _http_json("https://open.er-api.com/v6/latest/TRY", timeout=12)
+        if data.get("result") == "success" and data.get("rates"):
+            rates = data["rates"]
+            out = {c: 1.0 / float(rates[c]) for c in ("USD", "EUR", "GBP") if float(rates.get(c, 0) or 0) > 0}
+            if "USD" in out:
+                return out, "ExchangeRate-API"
+    except Exception:
+        pass
+    out = {}
+    for cur in ("USD", "EUR", "GBP"):
+        try:
+            out[cur] = _yahoo_price(f"{cur}TRY=X")
+        except Exception:
+            pass
+    if out:
+        return out, "Yahoo Finance FX"
+    raise RuntimeError("Döviz kurları alınamadı.")
+
+
+def _metal_usd_oz(code: str) -> tuple[float, str]:
+    try:
+        data = _http_json(f"https://api.gold-api.com/price/{code}", timeout=12)
+        value = data.get("price")
+        if value and float(value) > 0:
+            return float(value), "Gold-API"
+    except Exception:
+        pass
+    ticker = "GC=F" if code == "XAU" else "SI=F"
+    return _yahoo_price(ticker), "Yahoo Finance"
+
+
+_QUOTE_CACHE: dict = {"ts": 0.0, "data": None}
+_QUOTE_TTL = 60  # saniye
+
+
+def _series_lookup(series):
+    dates = [d for d, _ in series]
+    vals = [v for _, v in series]
+
+    def at(day):
+        if not vals:
+            return None
+        return vals[max(bisect_right(dates, day) - 1, 0)]
+    return at
+
+
+def _gram_series(metal: dict, usd: dict | None):
+    if not usd or not usd["series"]:
+        return []
+    at = _series_lookup(usd["series"])
+    return [(d, v * at(d) / OZ_GRAM) for d, v in metal["series"] if at(d)]
+
+
+def _make_quote(key, label, unit, price, prev, series, source, **extra):
+    valid_prev = prev if prev and prev > 0 else None
+    return {
+        "key": key, "label": label, "unit": unit, "price": price, "prev": valid_prev,
+        "change_pct": ((price / valid_prev) - 1) * 100 if valid_prev else None,
+        "change_abs": (price - valid_prev) if valid_prev else None,
+        "series": [{"d": d, "v": v} for d, v in series], "source": source, **extra,
+    }
+
+
+def _build_quotes(force: bool = False) -> dict:
+    """Altın, gümüş, USD ve EUR için fiyat + günlük değişim. 60 sn önbelleğe alınır."""
+    now_ts = time.time()
+    if not force and _QUOTE_CACHE["data"] and now_ts - _QUOTE_CACHE["ts"] < _QUOTE_TTL:
+        return _QUOTE_CACHE["data"]
+
+    symbols = {"usd": "USDTRY=X", "eur": "EURTRY=X", "gbp": "GBPTRY=X", "xau": "GC=F", "xag": "SI=F"}
+    raw, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {k: pool.submit(_yahoo_chart, s) for k, s in symbols.items()}
+        for k, fut in futures.items():
+            try:
+                raw[k] = fut.result()
+            except Exception as exc:
+                errors[k] = str(exc)[:120]
+
+    with db() as con:
+        stored = fx_map(con)
+
+    fallback_fx = {}
+    if not all(k in raw for k in ("usd", "eur", "gbp")):
+        try:
+            fallback_fx, _ = _get_fx_rates()
+        except Exception:
+            fallback_fx = {}
+
+    live = {}  # yalnızca gerçekten canlı alınan kurlar (veritabanına yazılabilir)
+
+    def fx_quote(key, label, code):
+        if key in raw:
+            r = raw[key]
+            live[code] = r["price"]
+            return _make_quote(key, label, "₺", r["price"], r["prev"], r["series"], "Yahoo Finance")
+        if code in fallback_fx:
+            live[code] = fallback_fx[code]
+            return _make_quote(key, label, "₺", fallback_fx[code], None, [], "ExchangeRate-API")
+        return _make_quote(key, label, "₺", float(stored.get(code, 0)), None, [], "Kayıtlı kur")
+
+    usd_q = fx_quote("usd", "USD/TRY", "USD")
+    eur_q = fx_quote("eur", "EUR/TRY", "EUR")
+    if "gbp" in raw:
+        live["GBP"] = raw["gbp"]["price"]
+    elif "GBP" in fallback_fx:
+        live["GBP"] = fallback_fx["GBP"]
+    usd_p = usd_q["price"] or float(stored.get("USD", 0))
+
+    def metal_quote(key, label, rk, stored_key, code):
+        if rk in raw:
+            m, u = raw[rk], raw.get("usd")
+            price = m["price"] * usd_p / OZ_GRAM
+            prev = (m["prev"] * u["prev"] / OZ_GRAM) if (u and m["prev"] and u["prev"]) else None
+            ons_change = ((m["price"] / m["prev"]) - 1) * 100 if m["prev"] else None
+            live[stored_key] = price
+            return _make_quote(key, label, "₺/gr", price, prev, _gram_series(m, u), "Yahoo Finance",
+                               ons_usd=m["price"], ons_change_pct=ons_change)
+        try:
+            ounce, src = _metal_usd_oz(code)
+            price = ounce * usd_p / OZ_GRAM
+            live[stored_key] = price
+            return _make_quote(key, label, "₺/gr", price, None, [], src, ons_usd=ounce, ons_change_pct=None)
+        except Exception:
+            return _make_quote(key, label, "₺/gr", float(stored.get(stored_key, 0)), None, [], "Kayıtlı kur",
+                               ons_usd=None, ons_change_pct=None)
+
+    gold_q = metal_quote("gold", "Gram altın", "xau", "GAUTRY", "XAU")
+    silver_q = metal_quote("silver", "Gram gümüş", "xag", "GAGTRY", "XAG")
+
+    data = {
+        "quotes": [gold_q, silver_q, usd_q, eur_q],
+        "fx": {k: float(v) for k, v in live.items() if v and float(v) > 0},
+        "errors": errors,
+        "updated_at": _now(),
+    }
+    _QUOTE_CACHE["ts"] = now_ts
+    _QUOTE_CACHE["data"] = data
+    return data
+
+
+@app.get("/api/market/quotes")
+def market_quotes():
+    return jsonify(_build_quotes(force=request.args.get("force") == "1"))
+
+
+def _asset_kind(a: dict) -> str:
+    cat = _norm(a.get("category"))
+    src = _norm(a.get("price_source"))
+    if any(k in cat for k in ("doviz", "forex", "currency")):
+        return "fx"
+    if any(k in cat for k in ("kripto", "crypto")) or src in ("coingecko", "crypto"):
+        return "crypto"
+    if any(k in cat for k in ("emtia", "altin", "gumus", "metal")):
+        return "metal"
+    return "equity"
+
+
+@app.post("/api/market/refresh")
+def market_refresh():
+    updated, errors = [], []
+    now = _now()
+    with db() as con:
+        assets = [dict(r) for r in con.execute("SELECT * FROM assets WHERE lower(COALESCE(price_source,'manual'))!='manual'")]
+        rates = fx_map(con)
+
+    snap = _build_quotes(force=True)
+    rates.update({k: float(v) for k, v in snap["fx"].items() if v and float(v) > 0})
+    usd_try = float(rates.get("USD") or 34.5)
+    rates["USDT"] = usd_try
+
+    def symbol_of(a):
+        return str(a.get("market_symbol") or a.get("symbol") or "").strip()
+
+    # Kripto: tek istekte; hisse/fon: paralel
+    coin_ids = {a["id"]: _coin_id(symbol_of(a)) for a in assets if _asset_kind(a) == "crypto"}
+    coin_prices, coin_error = {}, None
+    ids = sorted({i for i in coin_ids.values() if i})
+    if ids:
+        try:
+            coin_prices = _coingecko_prices(ids)
+        except Exception as exc:
+            coin_error = str(exc)[:150]
+
+    equity_results = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {a["id"]: pool.submit(_yahoo_chart, symbol_of(a), "5d") for a in assets if _asset_kind(a) == "equity"}
+        for aid, fut in futures.items():
+            try:
+                equity_results[aid] = fut.result()
+            except Exception as exc:
+                equity_results[aid] = exc
+
+    def native_price(a):
+        kind = _asset_kind(a)
+        currency = str(a.get("currency") or "TRY").upper()
+        cur_rate = float(rates.get(currency) or 1.0)
+        symbol = symbol_of(a)
+        if kind == "fx":
+            code = (symbol or currency).upper().replace("/TRY", "").replace("=X", "")
+            if code.endswith("TRY") and code not in rates:
+                code = code[:-3]
+            price_try = 1.0 if code in ("", "TRY") else rates.get(code)
+            if not price_try:
+                raise RuntimeError(f"'{code}' için kur bulunamadı.")
+        elif kind == "crypto":
+            cid = coin_ids.get(a["id"])
+            if not cid:
+                raise RuntimeError("CoinGecko ID/sembolü girilmemiş.")
+            usd_price = coin_prices.get(cid)
+            if usd_price is None:
+                raise RuntimeError(coin_error or f"CoinGecko '{cid}' için fiyat döndürmedi.")
+            price_try = usd_price * usd_try
+        elif kind == "metal":
+            is_silver = any(k in _norm(symbol + a.get("name", "")) for k in ("xag", "silver", "gumus"))
+            price_try = rates.get("GAGTRY" if is_silver else "GAUTRY")
+            if not price_try:
+                raise RuntimeError("Altın/gümüş gram fiyatı alınamadı.")
+        else:
+            res = equity_results.get(a["id"])
+            if res is None:
+                raise RuntimeError("Piyasa sembolü girilmemiş.")
+            if isinstance(res, Exception):
+                raise RuntimeError(str(res))
+            price = res["price"]
+            qcur = res.get("currency") or currency
+            if qcur == "GBp":
+                price, qcur = price / 100, "GBP"
+            qcur = str(qcur).upper()
+            if qcur == currency:
+                return price
+            q_rate = 1.0 if qcur == "TRY" else rates.get(qcur)
+            if not q_rate:
+                raise RuntimeError(f"{qcur} kuru bulunamadı.")
+            price_try = price * q_rate
+        return price_try / cur_rate if cur_rate > 0 else price_try
+
+    price_updates = []
+    for a in assets:
+        try:
+            price = native_price(a)
+            if price and price > 0:
+                price_updates.append((float(price), now, a["id"]))
+                updated.append({"id": a["id"], "name": a["name"], "price": float(price)})
+        except Exception as exc:
+            errors.append({"name": str(a.get("name") or ""), "error": str(exc)[:150]})
+
+    with db() as con:
+        for cur, rate in rates.items():
+            if rate and float(rate) > 0 and cur in snap["fx"] or cur == "USDT":
+                con.execute("""INSERT INTO fx_rates(currency,try_rate,updated_at) VALUES(?,?,?)
+                    ON CONFLICT(currency) DO UPDATE SET try_rate=excluded.try_rate,updated_at=excluded.updated_at""",
+                    (cur, float(rate), now))
+        if price_updates:
+            con.executemany("UPDATE assets SET unit_price=?,updated_at=? WHERE id=?", price_updates)
+        save_snapshot(con)
+
+    return jsonify(ok=True, updated_count=len(updated), error_count=len(errors), errors=errors,
+                   market_errors=snap.get("errors", {}))
+
+
+# ----------------------------------------------------------------------------
+# İçe / dışa aktarma
+# ----------------------------------------------------------------------------
+IMPORT_ALIASES = {
+    "name": ["name", "ad", "adi", "isim", "varlik", "varlik adi"],
+    "symbol": ["symbol", "sembol", "kod"],
+    "category": ["category", "kategori", "tur"],
+    "account": ["account", "hesap", "kurum", "araci kurum"],
+    "quantity": ["quantity", "miktar", "adet"],
+    "unit_price": ["unit_price", "birim fiyat", "fiyat", "guncel fiyat"],
+    "currency": ["currency", "para birimi"],
+    "cost_per_unit": ["cost_per_unit", "maliyet", "birim maliyet", "ortalama maliyet"],
+    "notes": ["notes", "not", "notlar", "aciklama"],
+    "price_source": ["price_source", "fiyat kaynagi"],
+    "market_symbol": ["market_symbol", "piyasa sembolu"],
+}
+
+
+def _num(value, default=0.0):
+    if value is None or value == "":
+        return default
+    if isinstance(value, (int, float)):
+        f = float(value)
+        return f if f == f else default
+    s = str(value).strip().replace(" ", "")
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return default
+
+
+@app.post("/api/import")
+def import_excel():
+    if "file" not in request.files:
+        return jsonify(error="Excel dosyası seçilmedi."), 400
+    f = request.files["file"]
+    try:
+        book = pd.ExcelFile(f)
+        frame = pd.read_excel(book, book.sheet_names[0]).fillna("")
+        header_map = {}
+        for col in frame.columns:
+            key = _norm(col)
+            for field, aliases in IMPORT_ALIASES.items():
+                if key in aliases and field not in header_map.values():
+                    header_map[col] = field
+                    break
+        by_field = {v: k for k, v in header_map.items()}
+        now = _now()
+        count = skipped = 0
+        with db() as con:
+            known = fx_map(con)
+            seen = {(_norm(r["name"]), _norm(r["account"])) for r in con.execute("SELECT name,account FROM assets")}
+            for _, row in frame.iterrows():
+                def get(field, fallback=""):
+                    col = by_field.get(field)
+                    return row[col] if col is not None else fallback
+                name = str(get("name", row.iloc[0] if "name" not in by_field else "")).strip()
+                if not name:
+                    continue
+                account = str(get("account")).strip()
+                ident = (_norm(name), _norm(account))
+                if ident in seen:
+                    skipped += 1
+                    continue
+                seen.add(ident)
+                currency = (str(get("currency")).strip().upper() or "TRY")
+                if currency not in known:
+                    currency = "TRY"
+                con.execute("""INSERT INTO assets(name,symbol,category,account,quantity,unit_price,currency,cost_per_unit,
+                    notes,created_at,updated_at,price_source,market_symbol) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    name, str(get("symbol")).strip(), str(get("category")).strip() or "Diğer", account,
+                    max(0.0, _num(get("quantity"))), max(0.0, _num(get("unit_price"))), currency,
+                    max(0.0, _num(get("cost_per_unit"))), str(get("notes")), now, now,
+                    str(get("price_source")).strip() or "manual", str(get("market_symbol")).strip()))
+                count += 1
+            save_snapshot(con)
+        return jsonify(ok=True, imported=count, skipped=skipped)
+    except Exception as exc:
+        return jsonify(error=f"Excel okunamadı: {exc}"), 400
+
+
+@app.get("/api/export")
+def export_excel():
+    with db() as con:
+        assets = pd.read_sql_query("SELECT * FROM assets", con)
+        tx = pd.read_sql_query("SELECT * FROM transactions", con)
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        assets.to_excel(writer, sheet_name="Varlıklar", index=False)
+        tx.to_excel(writer, sheet_name="İşlemler", index=False)
+    out.seek(0)
+    return send_file(out, as_attachment=True, download_name="portfoy_yedek.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+init_db()
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
